@@ -1,1 +1,3 @@
-# backend
+# Backend
+
+Wymaga posprzątania i udokumentowania
