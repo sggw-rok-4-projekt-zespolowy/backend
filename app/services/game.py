@@ -1,3 +1,9 @@
+from app.models.game_session import GameSessionInfo, GameSessionInfoPublic, GameSessionStatus
+from app.models.message import ServerMessage, ServerMetaMessage
+from app.models.track import Track, TrackPublic
+from app.utils.crud import read_user_by_id
+from app.utils.logger import logger
+
 import asyncio
 import random
 import threading
@@ -5,19 +11,11 @@ import uuid
 
 from datetime import datetime, timedelta, timezone
 from fastapi import WebSocket
-from sqlmodel import select
+from sqlmodel import select, Session
 from typing import Any
 
-from app.auth.services import get_user_by_id
-from app.database import async_session_maker, SessionDep
+from app.database import engine, SessionDep
 from app.config import settings
-from app.game.models import GameSessionInfo
-from app.game.schemas import GameSessionInfoPublic
-from app.shared.logger import logger
-from app.track.models import Track
-from app.track.schemas import TrackPublic
-
-from .schemas import ServerMetaMessage, GameStatus, ServerMessage
 
 
 class NoTracksError(Exception):
@@ -132,7 +130,7 @@ class GameConnectionManager:
             )
 
             if not game.playlist:
-                db_tracks = (await db_session.exec(select(Track))).all()
+                db_tracks = db_session.exec(select(Track)).all()
 
                 if not db_tracks:
                     raise NoTracksError(
@@ -244,19 +242,19 @@ class GameConnectionManager:
     async def start_the_game(self, game_id: str):
         game = self.games[game_id]
 
-        async with async_session_maker() as db_session:
-            game_session_from_db = await db_session.get(
+        with Session(engine) as db_session:
+            game_session_from_db = db_session.get(
                 GameSessionInfo, uuid.UUID(game_id)
             )
 
             if game_session_from_db == None:
                 raise Exception(f"[{game_id}] Game session is no longer in DB.")
             else:
-                if game_session_from_db.status != GameStatus.IN_PROGRESS:
-                    game_session_from_db.status = GameStatus.IN_PROGRESS
+                if game_session_from_db.status != GameSessionStatus.IN_PROGRESS:
+                    game_session_from_db.status = GameSessionStatus.IN_PROGRESS
                     db_session.add(game_session_from_db)
-                    await db_session.commit()
-                    await db_session.refresh(game_session_from_db)
+                    db_session.commit()
+                    db_session.refresh(game_session_from_db)
                     game.game_session_metadata = GameSessionInfoPublic.model_validate(
                         game_session_from_db.model_dump()
                     )
@@ -348,32 +346,32 @@ class GameConnectionManager:
         if game.session_disconnect_timer.is_alive():
             game.session_disconnect_timer.cancel()
 
-        async with async_session_maker() as db_session:
+        with Session(engine) as db_session:
             ids_of_players_assigned_to_session = game.game_session_metadata.players_ids
 
             # Adding score for players:
             if game.game_session_metadata.registered == True:
                 for player_id in ids_of_players_assigned_to_session:
                     score = len(game.matched_tracks[player_id])
-                    user = await get_user_by_id(db_session, int(player_id))
+                    user = read_user_by_id(db_session, int(player_id))
                     assert user != None
                     user.score += score
                     db_session.add(user)
-                    await db_session.commit()
-                    await db_session.refresh(user)
+                    db_session.commit()
+                    db_session.refresh(user)
 
             # Updating the DB session info
-            game_session = await db_session.exec(
+            game_session = db_session.exec(
                 select(GameSessionInfo).where(
                     GameSessionInfo.session_id == uuid.UUID(game_id)
                 )
             )
             game_session = game_session.one()
-            game_session.status = GameStatus.FINISHED
+            game_session.status = GameSessionStatus.FINISHED
             db_session.add(game_session)
 
-            await db_session.commit()
-            await db_session.refresh(game_session)
+            db_session.commit()
+            db_session.refresh(game_session)
 
         await manager.broadcast_game_state(
             game_id, game.game_session_metadata.players_ids
@@ -409,7 +407,7 @@ class GameSessionsLoader:
         # Removing from the in-memory list of registered games
         for k, v in self.player_to_loaded_game_session_map.copy().items():
             # Refreshing state from DB:
-            v_from_db = await db_session.get(GameSessionInfo, v.session_id)
+            v_from_db = db_session.get(GameSessionInfo, v.session_id)
             if v_from_db == None:
                 raise Exception(
                     f"[GameSessionsLoader][{v.session_id}] Game session is no longer in DB"
@@ -417,7 +415,7 @@ class GameSessionsLoader:
 
             v = v_from_db
 
-            if v.status == GameStatus.FINISHED:
+            if v.status == GameSessionStatus.FINISHED:
                 logger.info(
                     f"[GameSessionsLoader] Unloading game session {v.session_id} for player with id {k}"
                 )
@@ -428,14 +426,13 @@ class GameSessionsLoader:
         loaded_waiting_game_sessions = {
             player_id: game_session
             for player_id, game_session in self.player_to_loaded_game_session_map.items()
-            if game_session.status == GameStatus.WAITING_FOR_PLAYERS
+            if game_session.status == GameSessionStatus.WAITING_FOR_PLAYERS
         }
 
         # Unloading
         for player_id, game_session in loaded_waiting_game_sessions.items():
             assert isinstance(game_session.created_at, datetime)
-            tzinfo = game_session.created_at.tzinfo
-            time_passed = datetime.now(tz=tzinfo) - game_session.created_at
+            time_passed = datetime.now(tz=timezone.utc) - game_session.created_at.replace(tzinfo=timezone.utc)
 
             if (
                 int(time_passed.total_seconds() / 60)
@@ -447,23 +444,22 @@ class GameSessionsLoader:
 
                 if (
                     self.player_to_loaded_game_session_map[player_id].status
-                    == GameStatus.WAITING_FOR_PLAYERS
+                    == GameSessionStatus.WAITING_FOR_PLAYERS
                 ):  # Shouldn't happen. Sanity check
                     del self.player_to_loaded_game_session_map[player_id]
 
         # Deleting from DB
         db_waiting_game_sessions = (
-            await db_session.exec(
+            db_session.exec(
                 select(GameSessionInfo).where(
-                    GameSessionInfo.status == GameStatus.WAITING_FOR_PLAYERS
+                    GameSessionInfo.status == GameSessionStatus.WAITING_FOR_PLAYERS
                 )
             )
         ).all()
 
         for game_session in db_waiting_game_sessions:
             assert isinstance(game_session.created_at, datetime)
-            tzinfo = game_session.created_at.tzinfo
-            time_passed = datetime.now(tz=tzinfo) - game_session.created_at
+            time_passed = datetime.now(tz=timezone.utc) - game_session.created_at.replace(tzinfo=timezone.utc)
             logger.info(
                 f"[{game_session.session_id}] has been waiting for {time_passed}"
             )
@@ -475,9 +471,9 @@ class GameSessionsLoader:
                 logger.info(
                     f"[{game_session.session_id}] has been deleted from database after waiting for {time_passed}"
                 )
-                await db_session.delete(game_session)
+                db_session.delete(game_session)
 
-        await db_session.commit()
+        db_session.commit()
 
 
 manager = GameConnectionManager()

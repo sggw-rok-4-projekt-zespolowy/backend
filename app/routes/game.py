@@ -1,3 +1,15 @@
+from app.utils.dependencies import get_current_user
+from app.models.game_session import (
+        GameSessionInfo,
+        GameSessionInfoCreate,
+        GameSessionInfoPublic,
+        GameSessionStatus,
+        GameSessionVariant
+    )
+from app.models.message import PlayerMessage, ServerMetaMessage
+from app.models.user import User
+from app.services.game import NoTracksError, manager, game_sessions_loader
+
 import asyncio
 import time
 import uuid
@@ -16,29 +28,17 @@ from fastapi import (
 from sqlmodel import select, func
 from typing import Annotated
 
-from app.auth.models import User
 from app.config import settings
 from app.database import SessionDep
-from app.shared.dependencies import get_current_active_user, get_current_user
-from app.shared.logger import logger
+from app.utils.logger import logger
 
-from .models import GameSessionInfo
-from .schemas import (
-    ServerMetaMessage,
-    GameSessionInfoCreate,
-    GameSessionInfoPublic,
-    GameSessionVariant,
-    GameStatus,
-    PlayerMessage,
-)
-from .services import NoTracksError, manager, game_sessions_loader
 
 router = APIRouter(prefix="/game")
 
 
 @router.get("", response_model=Sequence[GameSessionInfoPublic])
 async def read_sessions(session: SessionDep) -> Sequence[GameSessionInfo]:
-    sessions = (await session.exec(select(GameSessionInfo))).all()
+    sessions = session.exec(select(GameSessionInfo)).all()
     return sessions
 
 
@@ -54,8 +54,8 @@ async def create_session(
     )
 
     session.add(new_game_session)
-    await session.commit()
-    await session.refresh(new_game_session)
+    session.commit()
+    session.refresh(new_game_session)
     return new_game_session
 
 
@@ -67,9 +67,9 @@ awaiting_players_queue: dict[str, list[int]] = {}  # TODO - Move this elsewhere
 async def create_registered_session(
     session: SessionDep,
     requested_session: GameSessionInfoCreate,
-    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_user: Annotated[User, Depends(get_current_user(enforce_active=True))],
 ) -> GameSessionInfo | Response:
-    logger.info("[registered start] Received matchmaking request for session: f{requested_session}")
+    logger.info(f"[registered start] Received matchmaking request for session: {requested_session}")
     # This code could probably use some refactoring for readability
     assert (
         current_user.id != None
@@ -81,8 +81,8 @@ async def create_registered_session(
             players_ids=[str(current_user.id)],
         )
         session.add(new_game_session)
-        await session.commit()
-        await session.refresh(new_game_session)
+        session.commit()
+        session.refresh(new_game_session)
         return new_game_session
 
     elif requested_session.variant == "DUEL":
@@ -133,8 +133,8 @@ async def create_registered_session(
                         rounds=requested_session.rounds,
                     )
                     session.add(new_game_session)
-                    await session.commit()
-                    await session.refresh(new_game_session)
+                    session.commit()
+                    session.refresh(new_game_session)
                     for player_id in players_ids:
                         game_sessions_loader.player_to_loaded_game_session_map[
                             str(player_id)
@@ -163,7 +163,7 @@ async def game_session_ws(
         await websocket.close(reason="Invalid game session ID format")
         return
 
-    game_info = await db_session.get(GameSessionInfo, parsed_game_id)
+    game_info = db_session.get(GameSessionInfo, parsed_game_id)
 
     if not game_info or player_id not in game_info.players_ids:
         print("[WS] Error: Invalid game session or player ID")
@@ -175,7 +175,7 @@ async def game_session_ws(
         await websocket.close(reason="Invalid game session or player ID")
         return
 
-    if game_info.status == GameStatus.FINISHED:
+    if game_info.status == GameSessionStatus.FINISHED:
         await websocket.accept()
         print(
             f"[Game {game_info.session_id}] Cannot start game session which has state FINISHED."
@@ -191,7 +191,7 @@ async def game_session_ws(
     # Validate tokens and initialize session
     if game_info.registered:
         try:
-            user = await get_current_user(access_token, db_session)
+            user = get_current_user()(access_token, db_session)
             if str(user.id) != str(player_id):
                 raise Exception("Invalid token")
 
@@ -308,3 +308,4 @@ async def game_session_ws(
 
     except WebSocketDisconnect:
         await manager.disconnect(game_session_id, player_id)
+

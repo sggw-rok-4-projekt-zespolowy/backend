@@ -1,7 +1,6 @@
 from functools import lru_cache
-from typing import Literal
-
 from pydantic_settings import BaseSettings
+from typing import Literal
 
 
 class Settings(BaseSettings):
@@ -9,11 +8,14 @@ class Settings(BaseSettings):
     # .env and ENV variables take precedence over these definitions
 
     # Application
-    APP_NAME: str = "BUC Backend"
+    APP_NAME: str = "Backend"
     DEBUG: bool = False
+    ADMIN_EMAIL: str = "admin@admin"
+    ADMIN_USERNAME: str = "administrator"
+    ADMIN_PASSWORD: str = "insecure"
 
     # Database
-    DATABASE_URL: str = "sqlite+aiosqlite:///./buc.db"
+    DATABASE_URL: str = "sqlite:///./database.db"
 
     # JWT Settings
     JWT_SECRET_KEY: str = "super-secret-key"
@@ -46,9 +48,5 @@ class Settings(BaseSettings):
     # How long before session is finished when one of the player disconnects when session is in progress. In seconds.
     SESSION_DISCONNECT_TERMINATION_TIME: int = 45
 
-@lru_cache
-def get_settings() -> Settings:
-    return Settings()
 
-
-settings = get_settings()
+settings = Settings()

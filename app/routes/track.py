@@ -1,3 +1,4 @@
+from app.models.track import Track, TrackCreate, TrackCreateFromDeezer, TrackPublic
 import os
 import uuid
 from collections.abc import Sequence
@@ -10,8 +11,6 @@ from sqlmodel import select
 from app.config import settings
 from app.database import SessionDep
 
-from .models import Track
-from .schemas import TrackCreate, TrackPublic
 
 router = APIRouter(prefix="/track")
 
@@ -22,14 +21,14 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @router.get("", response_model=Sequence[TrackPublic])
 async def read_tracks(session: SessionDep) -> Sequence[Track]:
-    tracks = (await session.exec(select(Track))).all()
+    tracks = session.exec(select(Track)).all()
     return tracks
 
 
 @router.post("")
-async def create_track(session: SessionDep, track: TrackCreate) -> Track:
+async def create_track(session: SessionDep, track: TrackCreateFromDeezer) -> Track:
     existing = (
-        await session.exec(
+        session.exec(
             select(Track).where(Track.deezer_track_id == track.deezer_track_id)
         )
     ).first()
@@ -88,6 +87,6 @@ async def create_track(session: SessionDep, track: TrackCreate) -> Track:
     )
 
     session.add(new_track)
-    await session.commit()
-    await session.refresh(new_track)
+    session.commit()
+    session.refresh(new_track)
     return new_track

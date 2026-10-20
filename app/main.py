@@ -1,24 +1,20 @@
-from collections.abc import AsyncGenerator
+from app.config import settings
+from app.routes.audio import router as audio_router
+from app.routes.auth import router as auth_router
+from app.routes.cover import router as cover_router
+from app.routes.game import router as game_router
+from app.routes.track import router as track_router
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .config import settings
-from .database import create_tables
-
-from .audio.routes import router as audio_router
-from .auth.routes import router as auth_router
-from .cover.routes import router as cover_router
-from .game.routes import router as game_router
-from .track.routes import router as track_router
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI):
     """Application lifespan events."""
-    # Startup: Create tables (for development)
-    await create_tables()
     # ## FOR DEBUG. REMOVE IN PROD:
     # import debugpy
     # debugpy.listen(5678)
@@ -47,9 +43,3 @@ app.include_router(auth_router)
 app.include_router(cover_router)
 app.include_router(game_router)
 app.include_router(track_router)
-
-
-# Health check endpoint
-@app.get("/health")
-async def health_check() -> dict[str, str]:
-    return {"status": "healthy"}
