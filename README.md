@@ -4,11 +4,9 @@ WIP - Mocno
 
 # Lokalne uruchmienie backendu
 
-Na Linuksie, na Windzie pewnie podobnie. Potem sprawdzę, jak tam konkretnie.
+Instrukcje na Linux. na Windowsie pewnie podobnie. Potem sprawdzę, jak konkretnie.
 
-Po zrobieniu git pull https://github.com/sggw-rok-4-projekt-zespolowy/backend
-
-0. `https://github.com/sggw-rok-4-projekt-zespolowy/backend`
+0. `git pull https://github.com/sggw-rok-4-projekt-zespolowy/backend`
 1. `python -m venv venv`
 2. `source venv/bin/activate`
 3. `pip install -r requirements.txt`
