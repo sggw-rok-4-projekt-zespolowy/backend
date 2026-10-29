@@ -1,22 +1,19 @@
-from app.models.track import Track, TrackCreate, TrackCreateFromDeezer, TrackPublic
-import os
-import uuid
-from collections.abc import Sequence
-from datetime import datetime
-
-import requests
-from fastapi import APIRouter, HTTPException
-from sqlmodel import select
-
 from app.config import settings
 from app.database import SessionDep
-
+from app.models.track import Track, TrackCreate, TrackCreateFromDeezer, TrackPublic
+from collections.abc import Sequence
+from datetime import datetime
+from fastapi import APIRouter, HTTPException
+from os import makedirs, path
+from requests import get
+from sqlmodel import select
+from uuid import uuid4
 
 router = APIRouter(prefix="/track")
 
 UPLOAD_DIR = settings.UPLOAD_DIR
 BASE_URL = settings.BASE_URL
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 @router.get("", response_model=Sequence[TrackPublic])
@@ -37,7 +34,7 @@ async def create_track(session: SessionDep, track: TrackCreateFromDeezer) -> Tra
             status_code=400, detail="This track already exists in the database"
         )
 
-    res = requests.get(f"https://api.deezer.com/track/{track.deezer_track_id}")
+    res = get(f"https://api.deezer.com/track/{track.deezer_track_id}")
     if res.status_code != 200:
         raise HTTPException(
             status_code=404, detail="Couldn't get the track from Deezer"
@@ -49,13 +46,13 @@ async def create_track(session: SessionDep, track: TrackCreateFromDeezer) -> Tra
             status_code=404, detail="The response from Deezer was not as expected"
         )
 
-    preview_res = requests.get(res_data["preview"])
+    preview_res = get(res_data["preview"])
     if preview_res.status_code != 200:
         raise HTTPException(
             status_code=404, detail="Couldn't access audio preview from Deezer"
         )
 
-    image_res = requests.get(res_data["album"]["cover_medium"])
+    image_res = get(res_data["album"]["cover_medium"])
     if image_res.status_code != 200:
         raise HTTPException(
             status_code=404, detail="Couldn't access album cover from Deezer"
@@ -63,13 +60,13 @@ async def create_track(session: SessionDep, track: TrackCreateFromDeezer) -> Tra
 
     release_date = datetime.strptime(res_data["release_date"], "%Y-%m-%d")
 
-    audio_filename = f"{uuid.uuid4()}_{datetime.now().timestamp()}"
-    file_location = os.path.join(UPLOAD_DIR, audio_filename) + ".mp3"
+    audio_filename = f"{uuid4()}_{datetime.now().timestamp()}"
+    file_location = path.join(UPLOAD_DIR, audio_filename) + ".mp3"
     with open(file_location, "wb") as f:
         f.write(preview_res.content)
 
-    image_filename = f"{uuid.uuid4()}_{datetime.now().timestamp()}"
-    file_location = os.path.join(UPLOAD_DIR, image_filename) + ".jpg"
+    image_filename = f"{uuid4()}_{datetime.now().timestamp()}"
+    file_location = path.join(UPLOAD_DIR, image_filename) + ".jpg"
     with open(file_location, "wb") as f:
         f.write(image_res.content)
 
@@ -82,7 +79,7 @@ async def create_track(session: SessionDep, track: TrackCreateFromDeezer) -> Tra
             deezer_track_id=track.deezer_track_id,
             preview_url=f"{BASE_URL}/audio/{audio_filename}.mp3",
             image_url=res_data.get("album", {}).get("cover_medium"),
-            backup_image_url=f"{BASE_URL}/cover/{image_filename}.jpg"
+            backup_image_url=f"{BASE_URL}/cover/{image_filename}.jpg",
         )
     )
 

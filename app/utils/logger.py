@@ -1,2 +1,3 @@
-import logging
-logger = logging.getLogger('uvicorn.error')
+from logging import getLogger
+
+logger = getLogger("uvicorn.error")

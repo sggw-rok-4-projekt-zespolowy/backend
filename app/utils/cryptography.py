@@ -1,5 +1,6 @@
 from pwdlib import PasswordHash
 
+
 def hash_password(password: str) -> str:
     return PasswordHash.recommended().hash(password)
 

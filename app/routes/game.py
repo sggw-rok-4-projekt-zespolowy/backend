@@ -1,22 +1,21 @@
-from app.utils.dependencies import get_current_user
+from asyncio import run
+from app.config import settings
+from app.database import SessionDep
 from app.models.game_session import (
-        GameSessionInfo,
-        GameSessionInfoCreate,
-        GameSessionInfoPublic,
-        GameSessionStatus,
-        GameSessionVariant
-    )
+    GameSessionInfo,
+    GameSessionInfoCreate,
+    GameSessionInfoPublic,
+    GameSessionStatus,
+    GameSessionVariant,
+)
 from app.models.message import PlayerMessage, ServerMetaMessage
 from app.models.user import User
 from app.services.game import NoTracksError, manager, game_sessions_loader
-
-import asyncio
-import time
-import uuid
-import threading
-
+from app.services.matchmaking import matchmakingService
+from app.utils.dependencies import get_current_user
+from app.utils.logger import logger
 from collections.abc import Sequence
-
+from datetime import timedelta
 from fastapi import (
     APIRouter,
     Depends,
@@ -25,13 +24,12 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from random import randint
 from sqlmodel import select, func
+from threading import Timer
+from time import sleep
 from typing import Annotated
-
-from app.config import settings
-from app.database import SessionDep
-from app.utils.logger import logger
-
+from uuid import UUID, uuid4
 
 router = APIRouter(prefix="/game")
 
@@ -47,10 +45,10 @@ async def create_session(
     session: SessionDep, requested_session: GameSessionInfoCreate
 ) -> GameSessionInfo:
     player_count = 1 if requested_session.variant == GameSessionVariant.SINGLE else 2
-    time.sleep(3)
+    sleep(3)
     new_game_session = GameSessionInfo(
         variant=requested_session.variant,
-        players_ids=[str(uuid.uuid4()) for _ in range(player_count)],
+        players_ids=[randint(1,99999) for _ in range(player_count)],
     )
 
     session.add(new_game_session)
@@ -66,85 +64,48 @@ awaiting_players_queue: dict[str, list[int]] = {}  # TODO - Move this elsewhere
 @router.post("/registered-start", response_model=GameSessionInfoPublic)
 async def create_registered_session(
     session: SessionDep,
-    requested_session: GameSessionInfoCreate,
-    current_user: Annotated[User, Depends(get_current_user(enforce_active=True))],
+    requestedGameSession: GameSessionInfoCreate,
+    currentUser: Annotated[User, Depends(get_current_user(enforce_active=True))],
 ) -> GameSessionInfo | Response:
-    logger.info(f"[registered start] Received matchmaking request for session: {requested_session}")
-    # This code could probably use some refactoring for readability
-    assert (
-        current_user.id != None
-    )  # Shouldn't happen. It is here to make pyright happy.
-    if requested_session.variant == "SINGLE":
-        new_game_session = GameSessionInfo(
-            variant=GameSessionVariant.SINGLE,
-            registered=True,
-            players_ids=[str(current_user.id)],
-        )
-        session.add(new_game_session)
-        session.commit()
-        session.refresh(new_game_session)
-        return new_game_session
+    logger.info(
+        f"[registered start] Received matchmaking request for session: {requestedGameSession}"
+    )
 
-    elif requested_session.variant == "DUEL":
-        requested_session_stringified = str(requested_session)
-        if (
-            requested_session_stringified in awaiting_players_queue
-            and current_user.id in awaiting_players_queue[requested_session_stringified]
-        ):
-            return Response(status_code=202, content="Waiting for another player")
+    #Pyright thinks user id can be None here, but it can't.
+    #Here to make it happy.
+    assert currentUser.id != None
 
-        else:
-            await game_sessions_loader.unload_and_delete_stale_game_sessions(
-                db_session=session
-            )
+    # Means: this game session info object is for registered players
+    requestedGameSession.registered = True
 
-            if (
-                str(current_user.id)
-                in game_sessions_loader.player_to_loaded_game_session_map
+    matchmakingRequest = matchmakingService.findRequestByOwner(currentUser.id)
+
+    # Housekeeping: Removing stale requests
+    # TODO: In addition, a time-based trigger could be used, to remove stale in batches.
+    if matchmakingRequest:
+        if matchmakingService.isRequestStale(
+                matchmakingRequest,
+                timedelta(seconds=settings.STALE_MATCHMAKING_REQUEST_TIME)
             ):
-                return game_sessions_loader.player_to_loaded_game_session_map[
-                    str(current_user.id)
-                ]
+            matchmakingService.deleteRequest(matchmakingRequest)
+            matchmakingRequest = None
 
-            else:
+    if not matchmakingRequest:
+        matchmakingRequest = matchmakingService.createRequest(currentUser.id, requestedGameSession)
 
-                if (
-                    not requested_session_stringified in awaiting_players_queue
-                    or len(awaiting_players_queue[requested_session_stringified]) == 0
-                ):
-                    awaiting_players_queue[requested_session_stringified] = []
-                    awaiting_players_queue[requested_session_stringified].append(
-                        current_user.id
-                    )
-                    return Response(
-                        status_code=202, content="Waiting for another player"
-                    )
+    # Trying to match with another player, or creating single player session.
+    matchmakingService.fulfillRequest(matchmakingRequest)
 
-                else:
-                    another_player_id = awaiting_players_queue[
-                        requested_session_stringified
-                    ].pop(0)
-                    players_ids = [current_user.id, another_player_id]
-                    new_game_session = GameSessionInfo(
-                        variant=GameSessionVariant.DUEL,
-                        registered=True,
-                        players_ids=[str(player_id) for player_id in players_ids],
-                        seconds_per_round=requested_session.seconds_per_round,
-                        rounds=requested_session.rounds,
-                    )
-                    session.add(new_game_session)
-                    session.commit()
-                    session.refresh(new_game_session)
-                    for player_id in players_ids:
-                        game_sessions_loader.player_to_loaded_game_session_map[
-                            str(player_id)
-                        ] = new_game_session
-                        for session_kind in awaiting_players_queue:
-                            if player_id in awaiting_players_queue[session_kind]:
-                                awaiting_players_queue[session_kind].remove(player_id)
-                    return new_game_session
+    if (
+            matchmakingRequest and
+            matchmakingRequest.createdGameSessionInfo and
+            matchmakingRequest.fulfilled
+    ):
+        return matchmakingRequest.createdGameSessionInfo
     else:
-        raise HTTPException(status_code=400, detail="Incorrect game variant")
+        return Response(
+            status_code=202, content="Waiting for another player"
+        )
 
 
 @router.websocket("/{game_session_id}/{player_id}")
@@ -152,12 +113,12 @@ async def game_session_ws(
     db_session: SessionDep,
     websocket: WebSocket,
     game_session_id: str,
-    player_id: str,
+    player_id: int,
     debug: bool = False,
     access_token: str = "",
 ) -> None:
     try:
-        parsed_game_id = uuid.UUID(game_session_id)
+        parsed_game_id = UUID(game_session_id)
     except ValueError:
         print(f"[WS] Error: {game_session_id} is not a valid UUID")
         await websocket.close(reason="Invalid game session ID format")
@@ -208,7 +169,6 @@ async def game_session_ws(
             await manager.disconnect(game_session_id, player_id)
             return
 
-
     try:
         await manager.initialize_game_state(
             game_session_id, db_session, game_info, debug
@@ -219,7 +179,6 @@ async def game_session_ws(
         await websocket.close(code=1011, reason=str(e))
         await manager.disconnect(game_session_id, player_id)
         return
-
 
     await manager.connect(websocket, game_session_id, player_id)
 
@@ -262,11 +221,9 @@ async def game_session_ws(
                     game_id=game_session_id, meta_msg=info_msg
                 )
                 game.session_disconnect_timer.cancel()
-                game.round_timer = threading.Timer(
+                game.round_timer = Timer(
                     seconds_left_on_round,
-                    lambda: asyncio.run(
-                        manager.handle_exceeded_round_time(game_session_id)
-                    ),
+                    lambda: run(manager.handle_exceeded_round_time(game_session_id)),
                 )
                 game.round_timer.start()
 
@@ -291,7 +248,7 @@ async def game_session_ws(
                             game_id=game_session_id,
                             player_id=player_id,
                             data=player_message.model_dump(),
-                            players_in_session=game_info.players_ids
+                            players_in_session=game_info.players_ids,
                         )
 
                     except Exception as e:
@@ -308,4 +265,3 @@ async def game_session_ws(
 
     except WebSocketDisconnect:
         await manager.disconnect(game_session_id, player_id)
-

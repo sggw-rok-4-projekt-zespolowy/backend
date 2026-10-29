@@ -15,13 +15,12 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = "insecure"
 
     # Database
-    DATABASE_URL: str = "sqlite:///./database.db"
+    DATABASE_URL: str = "sqlite:///database.db"
 
     # JWT Settings
     JWT_SECRET_KEY: str = "super-secret-key"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 3600
 
     # CORS
     FRONTEND_URL: str = "http://localhost:5173"
@@ -47,6 +46,9 @@ class Settings(BaseSettings):
 
     # How long before session is finished when one of the player disconnects when session is in progress. In seconds.
     SESSION_DISCONNECT_TERMINATION_TIME: int = 45
+
+    # How long can unfulfilled matchmaking request be waiting before deletion. In seconds.
+    STALE_MATCHMAKING_REQUEST_TIME: int = 20
 
 
 settings = Settings()

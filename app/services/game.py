@@ -1,6 +1,7 @@
 from app.models.game_session import GameSessionInfo, GameSessionInfoPublic, GameSessionStatus
 from app.models.message import ServerMessage, ServerMetaMessage
 from app.models.track import Track, TrackPublic
+from app.services.game_sessions_loader import game_sessions_loader
 from app.utils.crud import read_user_by_id
 from app.utils.logger import logger
 
@@ -25,11 +26,11 @@ class NoTracksError(Exception):
 class ActiveGameSession:
     def __init__(self, session_id: str):
         self.session_id = session_id
-        self.active_connections: dict[str, WebSocket] = {}
+        self.active_connections: dict[int, WebSocket] = {}
         self.playlist: list[TrackPublic] = []
-        self.matched_tracks: dict[str, list[TrackPublic]] = {}
+        self.matched_tracks: dict[int, list[TrackPublic]] = {}
         self.revealed_tracks: list[TrackPublic] = []
-        self.player_gave_answer: dict[str, bool] = {}
+        self.player_gave_answer: dict[int, bool] = {}
         self.registered: bool = (
             False  # Registered means that it's for registered users. i.e. tokens needed
         )
@@ -50,12 +51,12 @@ class GameConnectionManager:
     def __init__(self) -> None:
         self.games: dict[str, ActiveGameSession] = {}
 
-    async def connect(self, websocket: WebSocket, game_id: str, player_id: str) -> None:
+    async def connect(self, websocket: WebSocket, game_id: str, player_id: int) -> None:
         await websocket.accept()
         game = self.games[game_id]
         game.active_connections[player_id] = websocket
 
-    async def disconnect(self, game_id: str, player_id: str) -> None:
+    async def disconnect(self, game_id: str, player_id: int) -> None:
         game = self.games.get(game_id)
         if game:
             if player_id in game.active_connections:
@@ -114,7 +115,7 @@ class GameConnectionManager:
 
         if game.started == False:
             game.registered = game_info.registered
-            players_uuids = game_info.players_ids
+            players_ids = game_info.players_ids
             game.game_session_metadata = GameSessionInfoPublic.model_validate(
                 game_info.model_dump()
             )
@@ -141,21 +142,19 @@ class GameConnectionManager:
                 if not debug:
                     random.shuffle(game.playlist)
 
-            for p_uuid in players_uuids:
-                p_id_str = str(p_uuid)
+            for p_id in players_ids:
+                if not game.matched_tracks.get(p_id):
+                    game.matched_tracks[p_id] = []
 
-                if not game.matched_tracks.get(p_id_str):
-                    game.matched_tracks[p_id_str] = []
-
-                if p_uuid not in game.player_gave_answer:
-                    game.player_gave_answer[p_uuid] = False
+                if p_id not in game.player_gave_answer:
+                    game.player_gave_answer[p_id] = False
 
     async def process_player_action(
         self,
         game_id: str,
-        player_id: str,
+        player_id: int,
         data: dict[str, Any],
-        players_in_session: list[str],
+        players_in_session: list[int],
     ) -> None:
         game = self.games[game_id]
 
@@ -185,7 +184,7 @@ class GameConnectionManager:
             logger.info(f"[{game_id}] Correct answer from {player_id}: {submitted}.")
 
             if not game.current_guess_track in game.matched_tracks[player_id]:
-                game.matched_tracks[str(player_id)].insert(
+                game.matched_tracks[player_id].insert(
                     submitted, game.current_guess_track
                 )
 
@@ -198,7 +197,7 @@ class GameConnectionManager:
             await self.start_new_round(game_id)
 
     async def broadcast_game_state(
-        self, game_id: str, player_ids: list[str]
+        self, game_id: str, player_ids: list[int]
     ) -> None:
         game = self.games[game_id]
 
@@ -267,7 +266,7 @@ class GameConnectionManager:
         game.revealed_tracks.append(game.current_guess_track)
 
         for player_id in game.game_session_metadata.players_ids:
-            game.matched_tracks[str(player_id)].insert(0, game.current_guess_track)
+            game.matched_tracks[player_id].insert(0, game.current_guess_track)
 
         await self.start_new_round(game_id)
 
@@ -386,95 +385,5 @@ class GameConnectionManager:
         await game_sessions_loader.unload_finished_game_sessions(db_session)
 
 
-class GameSessionsLoader:
-    def __init__(self):
-        # Maps player id/uuid to a loaded session
-        self.player_to_loaded_game_session_map: dict[str, GameSessionInfo] = {}
-
-    async def load_game_session(self, game_session: GameSessionInfo):
-        # In near future, will redo it to take in ID only and will load session from DB instead.
-        # The way it is now, is for compatibility with other code
-        logger.info(f"[GameSessionsLoader] Loading game session {game_session.session_id}")
-
-        for player_id in game_session.players_ids:
-            self.player_to_loaded_game_session_map[player_id] = game_session
-
-    async def unload_finished_game_sessions(self, db_session: SessionDep):
-        logger.info(
-            "[GameSessionsLoader] Checking for game sessions that need to be unloaded"
-        )
-
-        # Removing from the in-memory list of registered games
-        for k, v in self.player_to_loaded_game_session_map.copy().items():
-            # Refreshing state from DB:
-            v_from_db = db_session.get(GameSessionInfo, v.session_id)
-            if v_from_db == None:
-                raise Exception(
-                    f"[GameSessionsLoader][{v.session_id}] Game session is no longer in DB"
-                )
-
-            v = v_from_db
-
-            if v.status == GameSessionStatus.FINISHED:
-                logger.info(
-                    f"[GameSessionsLoader] Unloading game session {v.session_id} for player with id {k}"
-                )
-                del self.player_to_loaded_game_session_map[k]
-
-    async def unload_and_delete_stale_game_sessions(self, db_session: SessionDep):
-        logger.info("[GameSessionLoader] Unloading and removing stale game sessions")
-        loaded_waiting_game_sessions = {
-            player_id: game_session
-            for player_id, game_session in self.player_to_loaded_game_session_map.items()
-            if game_session.status == GameSessionStatus.WAITING_FOR_PLAYERS
-        }
-
-        # Unloading
-        for player_id, game_session in loaded_waiting_game_sessions.items():
-            assert isinstance(game_session.created_at, datetime)
-            time_passed = datetime.now(tz=timezone.utc) - game_session.created_at.replace(tzinfo=timezone.utc)
-
-            if (
-                int(time_passed.total_seconds() / 60)
-                >= settings.REGISTERED_SESSION_START_TIMEOUT
-            ):
-                logger.info(
-                    f"[GameSessionLoader] {player_id} : {game_session.session_id} has been unloaded after waiting for {time_passed}"
-                )
-
-                if (
-                    self.player_to_loaded_game_session_map[player_id].status
-                    == GameSessionStatus.WAITING_FOR_PLAYERS
-                ):  # Shouldn't happen. Sanity check
-                    del self.player_to_loaded_game_session_map[player_id]
-
-        # Deleting from DB
-        db_waiting_game_sessions = (
-            db_session.exec(
-                select(GameSessionInfo).where(
-                    GameSessionInfo.status == GameSessionStatus.WAITING_FOR_PLAYERS
-                )
-            )
-        ).all()
-
-        for game_session in db_waiting_game_sessions:
-            assert isinstance(game_session.created_at, datetime)
-            time_passed = datetime.now(tz=timezone.utc) - game_session.created_at.replace(tzinfo=timezone.utc)
-            logger.info(
-                f"[{game_session.session_id}] has been waiting for {time_passed}"
-            )
-
-            if (
-                int(time_passed.total_seconds() / 60)
-                >= settings.REGISTERED_SESSION_START_TIMEOUT
-            ):
-                logger.info(
-                    f"[{game_session.session_id}] has been deleted from database after waiting for {time_passed}"
-                )
-                db_session.delete(game_session)
-
-        db_session.commit()
-
 
 manager = GameConnectionManager()
-game_sessions_loader = GameSessionsLoader()

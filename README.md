@@ -6,13 +6,20 @@ WIP - Mocno
 
 Na Linuksie, na Windzie pewnie podobnie. Potem sprawdzę, jak tam konkretnie.
 
-Po zrobieniu git pull https://github.com/sggw-rok-4-projekt-zespolowy/backend
+Za pierwszym razem:
 
-0. `https://github.com/sggw-rok-4-projekt-zespolowy/backend`
-1. `python -m venv venv`
-2. `source venv/bin/activate`
-3. `pip install -r requirements.txt`
-3. `python -m app.initialize_database`
-4. `fastapi dev`
+0. `git clone https://github.com/sggw-rok-4-projekt-zespolowy/backend`
+1. `cd backend`
+2. `python -m venv venv`
+3. `source venv/bin/activate`
+4. `pip install -r requirements.txt`
+5. `alembic upgrade head`
+6. `python -m app.initialize_database`
+7. `fastapi dev`
+8. `python seed_tracks.py`
+
+Kolejnym razem (w katalogu backend):
+0. `source venv/bin/activate`
+1. `fastapi dev`
 
 Potem można ściągnąć repo frontendu i uruchomić je przez `npm install` a potem `npm run dev` i powinno jakoś działać.

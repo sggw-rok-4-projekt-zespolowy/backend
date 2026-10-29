@@ -16,8 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # ## FOR DEBUG. REMOVE IN PROD:
-    # import debugpy
-    # debugpy.listen(5678)
+    import debugpy
+    debugpy.listen(5678)
     ##
     yield
     # Shutdown: cleanup if needed

@@ -1,9 +1,12 @@
 from enum import Enum
 from sqlmodel import Field, SQLModel
 
+
 class USER_ROLE(Enum):
     ADMIN = "ADMIN"
-    REGULAR_USER = "REGULAR_USER" 
+    REGULAR_USER = "REGULAR_USER"
+
+
 class BaseUser(SQLModel):
     # Auth related
     email: str = Field(unique=True, max_length=255)
@@ -14,13 +17,15 @@ class BaseUser(SQLModel):
     # Additional
     score: int = Field(ge=0, default=0)
 
+
 class User(BaseUser, table=True):
     id: int | None = Field(default=None, primary_key=True)
     password: str = Field(max_length=255)
 
+
 class UserCreate(BaseUser):
     password: str
 
+
 class UserPublic(BaseUser):
     id: int
-

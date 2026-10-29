@@ -3,10 +3,10 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from os import makedirs, path
 
-
 router = APIRouter(prefix="/audio")
 
 makedirs(settings.UPLOAD_DIR, exist_ok=True)
+
 
 @router.get("/{filename}")
 async def create_track(filename: str) -> FileResponse:

@@ -9,14 +9,13 @@ from fastapi.security import OAuth2PasswordBearer
 from jwt import decode, encode, InvalidTokenError
 from typing import Annotated
 
-
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
 def jwt_encode(
-        data: dict,
+    data: dict,
 ):
-    current_time = datetime.now(timezone(timedelta(), 'UTC'))
+    current_time = datetime.now(timezone(timedelta(), "UTC"))
     exp_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     data.update({"exp": current_time + exp_delta})
     return encode(data, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
@@ -27,16 +26,13 @@ def jwt_decode(token: str):
         token,
         settings.JWT_SECRET_KEY,
         algorithms=[settings.JWT_ALGORITHM],
-        options={"verify_exp": True, "require": ["exp"]}
+        options={"verify_exp": True, "require": ["exp"]},
     )
 
-def get_current_user(
-        allowed_roles: list[USER_ROLE] | None = [],
-        enforce_active = False
-    ):
+
+def get_current_user(allowed_roles: list[USER_ROLE] | None = [], enforce_active=False):
     def dependency(
-        token: Annotated[str, Depends(oauth2_scheme)],
-        session: SessionDep
+        token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep
     ) -> User:
 
         try:
@@ -56,20 +52,14 @@ def get_current_user(
 
         if allowed_roles:
             if (
-                USER_ROLE.REGULAR_USER in allowed_roles and
-                user.role not in [
-                        USER_ROLE.ADMIN,
-                        USER_ROLE.REGULAR_USER
-                ]
-            ) or (
-                USER_ROLE.ADMIN in allowed_roles and
-                user.role != USER_ROLE.ADMIN
-            ):
+                USER_ROLE.REGULAR_USER in allowed_roles
+                and user.role not in [USER_ROLE.ADMIN, USER_ROLE.REGULAR_USER]
+            ) or (USER_ROLE.ADMIN in allowed_roles and user.role != USER_ROLE.ADMIN):
                 raise HTTPForbidden
 
         return user
-    return dependency
 
+    return dependency
 
 
 def allowed_roles(allowed_roles: list[USER_ROLE]):
