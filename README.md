@@ -4,7 +4,7 @@ WIP - Mocno
 
 # Lokalne uruchmienie backendu
 
-Na Linuksie, na Windzie pewnie podobnie. Potem sprawdzę, jak tam konkretnie.
+Instrukcje na Linux. na Windowsie pewnie podobnie. Potem sprawdzę, jak konkretnie.
 
 Za pierwszym razem:
 
