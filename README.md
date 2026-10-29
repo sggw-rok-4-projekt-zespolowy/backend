@@ -16,7 +16,7 @@ Za pierwszym razem:
 5. `alembic upgrade head`
 6. `python -m app.initialize_database`
 7. `fastapi dev`
-8. `python seed_tracks.py`
+8. `python seed_tracks.py` (w drugim terminalu, gdy backend uruchomiony, w katalogu backend)
 
 Kolejnym razem (w katalogu backend):
 0. `source venv/bin/activate`
