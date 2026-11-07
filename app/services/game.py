@@ -84,7 +84,7 @@ class GameConnectionManager:
                         game.session_disconnect_timer = threading.Timer(
                             settings.SESSION_DISCONNECT_TERMINATION_TIME,
                             lambda: asyncio.run(
-                                self.finish_game(game_id=game_id, reason="Player with id {player_id} left the game.")
+                                self.finish_game(game_id=game_id, reason=f"Player with id {player_id} left the game.")
                             ),
                         )
                         game.session_disconnect_timer.start()

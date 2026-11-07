@@ -1,3 +1,4 @@
+from app.config import settings
 from app.database import engine
 from app.models.game_session import GameSessionInfo, GameSessionInfoCreate, GameSessionStatus, GameSessionVariant
 from app.models.matchmaking_request import MatchmakingRequest
@@ -31,7 +32,6 @@ class MatchmakingService:
 
 
     def deleteRequest(self, matchmakingRequest: MatchmakingRequest):
-
         # Removes a paired GameSessionInfo if it was created
         if matchmakingRequest.fulfilled:
             with Session(engine) as session:
@@ -157,7 +157,6 @@ class MatchmakingService:
                 matchmakingRequest.fulfilled and
                 matchmakingRequest.createdGameSessionInfo
         ):
-            # TODO: Get the copy from DB then refresh it and pair with the request again
             with Session(engine) as session:
                 gameSessionInfo = session.exec(
                         select(GameSessionInfo).where(
@@ -185,8 +184,15 @@ class MatchmakingService:
 
 
     def removeStaleRequests(self):
-        # Cleanup of old, not fulfilled requests
-        # TODO
-        pass
+        requestsCopy = self.requests.copy()
+        for playerId, request in requestsCopy.items():
+            # Skip already removed requests
+            if playerId in self.requests:
+                if self.isRequestStale(
+                    request,
+                    timedelta(seconds=settings.STALE_MATCHMAKING_REQUEST_TIME)
+                ):
+                    self.deleteRequest(request)
+
 
 matchmakingService = MatchmakingService()

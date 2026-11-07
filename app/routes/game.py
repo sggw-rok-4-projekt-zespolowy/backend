@@ -78,17 +78,10 @@ async def create_registered_session(
     # Means: this game session info object is for registered players
     requestedGameSession.registered = True
 
-    matchmakingRequest = matchmakingService.findRequestByOwner(currentUser.id)
-
     # Housekeeping: Removing stale requests
-    # TODO: In addition, a time-based trigger could be used, to remove stale in batches.
-    if matchmakingRequest:
-        if matchmakingService.isRequestStale(
-                matchmakingRequest,
-                timedelta(seconds=settings.STALE_MATCHMAKING_REQUEST_TIME)
-            ):
-            matchmakingService.deleteRequest(matchmakingRequest)
-            matchmakingRequest = None
+    matchmakingService.removeStaleRequests()
+
+    matchmakingRequest = matchmakingService.findRequestByOwner(currentUser.id)
 
     if not matchmakingRequest:
         matchmakingRequest = matchmakingService.createRequest(currentUser.id, requestedGameSession)
@@ -104,7 +97,8 @@ async def create_registered_session(
         return matchmakingRequest.createdGameSessionInfo
     else:
         return Response(
-            status_code=202, content="Waiting for another player"
+            status_code=202,
+            content="Waiting for another player"
         )
 
 
@@ -117,6 +111,7 @@ async def game_session_ws(
     debug: bool = False,
     access_token: str = "",
 ) -> None:
+
     try:
         parsed_game_id = UUID(game_session_id)
     except ValueError:
@@ -149,7 +144,6 @@ async def game_session_ws(
         await manager.disconnect(game_session_id, player_id)
         return
 
-    # Validate tokens and initialize session
     if game_info.registered:
         try:
             user = get_current_user()(access_token, db_session)

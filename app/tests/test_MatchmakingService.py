@@ -15,6 +15,10 @@ def engine_monkeypatch(monkeypatch):
 
     monkeypatch.setattr("app.services.matchmaking.engine", engine)
 
+@pytest.fixture(name="settings_monkeypatch")
+def settings_monkeypatch(monkeypatch):
+    monkeypatch.setattr("app.config.settings.STALE_MATCHMAKING_REQUEST_TIME", 5)
+
 
 def test_createRequest_creates_valid_request(engine_monkeypatch):
     ms = MatchmakingService()
@@ -28,7 +32,7 @@ def test_createRequest_creates_valid_request(engine_monkeypatch):
     assert request.requestedGameSessionInfo.rounds == 7
 
 
-def test_createRequest_finds_existing_request_by_owner(engine_monkeypatch):
+def test_findRequestByOwner_finds_existing_request_by_owner(engine_monkeypatch):
     ms = MatchmakingService()
 
     ms.createRequest(
@@ -45,7 +49,7 @@ def test_createRequest_finds_existing_request_by_owner(engine_monkeypatch):
     assert request.requestedGameSessionInfo.rounds == 7
 
 
-def test_createRequest_fulfills_request_if_conditions_met(engine_monkeypatch):
+def test_fulfillRequest_fulfills_request_if_conditions_met(engine_monkeypatch):
     ms = MatchmakingService()
 
     requestsMade = []
@@ -94,7 +98,7 @@ def test_createRequest_fulfills_request_if_conditions_met(engine_monkeypatch):
     assert requestsMade[0].createdGameSessionInfo == requestsMade[2].createdGameSessionInfo
     assert [1, 3] == requestsMade[0].createdGameSessionInfo.players_ids
 
-def test_createRequest_fulfills_request_if_conditions_met_singleplayer(engine_monkeypatch):
+def test_fulfillRequest_fulfills_request_if_conditions_met_singleplayer(engine_monkeypatch):
     ms = MatchmakingService()
 
     requestsMade = []
@@ -113,7 +117,7 @@ def test_createRequest_fulfills_request_if_conditions_met_singleplayer(engine_mo
     assert requestsMade[0].createdGameSessionInfo != None
     assert [1] == requestsMade[0].createdGameSessionInfo.players_ids
 
-def test_createRequest_removes_stale_request_when_appropriate(engine_monkeypatch):
+def test_isRequestStale_deleteRequest_remove_stale_request_when_appropriate(engine_monkeypatch):
     ms = MatchmakingService()
 
     requestsMade = []
@@ -153,10 +157,92 @@ def test_createRequest_removes_stale_request_when_appropriate(engine_monkeypatch
 
     sleep(7)
 
+    requestsMade.append(
+        ms.createRequest(
+            requestOwnerId = 3,
+            requestedGameSessionInfo = GameSessionInfoCreate(rounds = 3, variant=GameSessionVariant.DUEL)
+        )
+    )
+
     if ms.isRequestStale(
             requestsMade[0],
             timedelta(seconds=5)
         ):
         ms.deleteRequest(requestsMade[0])
 
-    assert len(ms.requests.values()) == 0
+    assert len(ms.requests.values()) == 1
+
+def test_removeStaleRequests_removes_stale_request_when_appropriate(engine_monkeypatch, settings_monkeypatch):
+    ms = MatchmakingService()
+
+    requestsMade = []
+
+    requestsMade.append(
+        ms.createRequest(
+            requestOwnerId = 1,
+            requestedGameSessionInfo = GameSessionInfoCreate(rounds = 5, variant=GameSessionVariant.DUEL)
+        )
+    )
+
+    requestsMade.append(
+        ms.createRequest(
+            requestOwnerId = 2,
+            requestedGameSessionInfo = GameSessionInfoCreate(rounds = 5, variant=GameSessionVariant.DUEL)
+        )
+    )
+
+    requestFulfilled = ms.fulfillRequest(requestsMade[1])
+
+    ms.removeStaleRequests()
+
+    with pytest.raises(ValueError):
+
+        requestsMade.append(
+            ms.createRequest(
+                requestOwnerId = 1,
+                requestedGameSessionInfo = GameSessionInfoCreate(rounds = 7, variant=GameSessionVariant.DUEL)
+            )
+        )
+
+    assert len(ms.requests.values()) == 2
+
+    sleep(7)
+
+    requestsMade.append(
+        ms.createRequest(
+            requestOwnerId = 3,
+            requestedGameSessionInfo = GameSessionInfoCreate(rounds = 3, variant=GameSessionVariant.DUEL)
+        )
+    )
+
+    ms.removeStaleRequests()
+
+    assert len(ms.requests.values()) == 1
+
+
+def test_removeStaleRequests_doesnt_affect_not_fulfilled_requests(engine_monkeypatch):
+    ms = MatchmakingService()
+
+    requestsMade = []
+
+    requestsMade.append(
+        ms.createRequest(
+            requestOwnerId = 1,
+            requestedGameSessionInfo = GameSessionInfoCreate(rounds = 5, variant=GameSessionVariant.DUEL)
+        )
+    )
+
+    requestsMade.append(
+        ms.createRequest(
+            requestOwnerId = 2,
+            requestedGameSessionInfo = GameSessionInfoCreate(rounds = 7, variant=GameSessionVariant.DUEL)
+        )
+    )
+
+    assert len(ms.requests.values()) == 2
+
+    ms.removeStaleRequests()
+
+    assert len(ms.requests.values()) == 2
+
+
