@@ -1,4 +1,4 @@
-from app.models.game_session import GameSessionInfo, GameSessionInfoPublic, GameSessionStatus
+from app.models.game_session import ALL_ROUNDS, GameSessionInfo, GameSessionInfoPublic, GameSessionStatus
 from app.models.message import ServerMessage, ServerMetaMessage
 from app.models.track import Track, TrackPublic
 from app.services.game_sessions_loader import game_sessions_loader
@@ -12,11 +12,16 @@ import uuid
 
 from datetime import datetime, timedelta, timezone
 from fastapi import WebSocket
-from sqlmodel import select, Session
+from sqlmodel import col, select, Session
 from typing import Any
 
 from app.database import engine, SessionDep
 from app.config import settings
+
+
+# Maximum number of cards on a player's board. When a new card would exceed it,
+# a random older card is discarded.
+MAX_BOARD_SIZE = 6
 
 
 class NoTracksError(Exception):
@@ -29,6 +34,7 @@ class ActiveGameSession:
         self.active_connections: dict[int, WebSocket] = {}
         self.playlist: list[TrackPublic] = []
         self.matched_tracks: dict[int, list[TrackPublic]] = {}
+        self.scores: dict[int, int] = {}
         self.revealed_tracks: list[TrackPublic] = []
         self.player_gave_answer: dict[int, bool] = {}
         self.registered: bool = (
@@ -131,13 +137,21 @@ class GameConnectionManager:
             )
 
             if not game.playlist:
-                db_tracks = db_session.exec(select(Track)).all()
+                # Shared tracks, plus the profile tracks of every player in a registered game.
+                # Quick game player IDs are random numbers, not user IDs, so only shared tracks there.
+                tracks_filter = col(Track.owner_id).is_(None)
+                if game_info.registered:
+                    tracks_filter = tracks_filter | col(Track.owner_id).in_(players_ids)
+                db_tracks = db_session.exec(select(Track).where(tracks_filter)).all()
 
                 if not db_tracks:
                     raise NoTracksError(
                         "No tracks in the database — add some tracks first."
                     )
-                game.playlist = [TrackPublic.model_validate(t) for t in db_tracks]
+
+                # Two players (or a player and the shared list) may have the same song
+                unique_tracks = {t.deezer_track_id: t for t in db_tracks}.values()
+                game.playlist = [TrackPublic.model_validate(t) for t in unique_tracks]
 
                 if not debug:
                     random.shuffle(game.playlist)
@@ -184,9 +198,17 @@ class GameConnectionManager:
             logger.info(f"[{game_id}] Correct answer from {player_id}: {submitted}.")
 
             if not game.current_guess_track in game.matched_tracks[player_id]:
-                game.matched_tracks[player_id].insert(
-                    submitted, game.current_guess_track
-                )
+                board.insert(submitted, game.current_guess_track)
+                game.scores[player_id] = game.scores.get(player_id, 0) + 1
+
+                if len(board) > MAX_BOARD_SIZE:
+                    discard_index = random.choice(
+                        [i for i in range(len(board)) if i != submitted]
+                    )
+                    discarded = board.pop(discard_index)
+                    logger.info(
+                        f"[{game_id}] Board of {player_id} is full - discarding {discarded.title}."
+                    )
 
             if not game.current_guess_track in game.revealed_tracks:
                 game.revealed_tracks.append(game.current_guess_track)
@@ -217,6 +239,7 @@ class GameConnectionManager:
                 finished=game.finished,
                 tracks_data=game.revealed_tracks,
                 current_round_number=game.current_round_number,
+                scores={p_id: game.scores.get(p_id, 0) for p_id in player_ids},
                 game_session_metadata=game.game_session_metadata,
             )
 
@@ -267,6 +290,7 @@ class GameConnectionManager:
 
         for player_id in game.game_session_metadata.players_ids:
             game.matched_tracks[player_id].insert(0, game.current_guess_track)
+            game.scores[player_id] = 1
 
         await self.start_new_round(game_id)
 
@@ -318,7 +342,8 @@ class GameConnectionManager:
         if game.finished == True:
             return True
         else:
-            if game.current_round_number >= game.game_session_metadata.rounds:
+            rounds = game.game_session_metadata.rounds
+            if rounds != ALL_ROUNDS and game.current_round_number >= rounds:
                 await self.finish_game(
                     game_id=game_id,
                     reason="Rounds limit reached.",
@@ -351,7 +376,7 @@ class GameConnectionManager:
             # Adding score for players:
             if game.game_session_metadata.registered == True:
                 for player_id in ids_of_players_assigned_to_session:
-                    score = len(game.matched_tracks[player_id])
+                    score = game.scores.get(player_id, 0)
                     user = read_user_by_id(db_session, int(player_id))
                     assert user != None
                     user.score += score

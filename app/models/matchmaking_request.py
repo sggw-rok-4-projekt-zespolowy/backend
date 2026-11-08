@@ -8,6 +8,6 @@ class MatchmakingRequest(BaseModel):
     requestOwnerId: int
     requestedGameSessionInfo: GameSessionInfoCreate
     createdGameSessionInfo: GameSessionInfo | None
-    matchedRequest: MatchmakingRequest | None
+    matchedRequest: "MatchmakingRequest | None"
     createdAt: datetime = Field(default_factory=datetime.utcnow)
     fulfilled: bool

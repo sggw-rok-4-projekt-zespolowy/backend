@@ -16,6 +16,8 @@ class ServerMessage(BaseModel):
     finished: bool
     tracks_data: list[TrackPublic]
     current_round_number: int
+    # Number of songs each player guessed correctly (the board shows at most MAX_BOARD_SIZE of them)
+    scores: dict[int, int]
     game_session_metadata: GameSessionInfoPublic
 
 
