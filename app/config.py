@@ -50,5 +50,8 @@ class Settings(BaseSettings):
     # How long can unfulfilled matchmaking request be waiting before deletion. In seconds.
     STALE_MATCHMAKING_REQUEST_TIME: int = 20
 
+    # Frequency of an in progress checking its state. In seconds.
+    GAME_LOOP_TICK_TIME: int = 1
+
 
 settings = Settings()

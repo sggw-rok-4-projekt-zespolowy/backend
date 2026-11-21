@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from sqlmodel import Field, SQLModel
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 
 class BaseTrack(SQLModel):
@@ -16,7 +16,7 @@ class BaseTrack(SQLModel):
 
 
 class Track(BaseTrack, table=True):
-    track_id: UUID = Field(primary_key=True, default_factory=uuid4)
+    track_id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
 
 
 class TrackCreate(BaseTrack):
@@ -28,4 +28,4 @@ class TrackCreateFromDeezer(BaseModel):
 
 
 class TrackPublic(BaseTrack):
-    track_id: UUID
+    track_id: str

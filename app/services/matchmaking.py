@@ -1,6 +1,6 @@
 from app.config import settings
 from app.database import engine
-from app.models.game_session import GameSessionInfo, GameSessionInfoCreate, GameSessionStatus, GameSessionVariant
+from app.models.game_session import GameSessionInfo, GameSessionInfoCreate, GameSessionState, GameSessionVariant
 from app.models.matchmaking_request import MatchmakingRequest
 from app.models.user import User
 from app.utils.logger import logger
@@ -10,10 +10,10 @@ from sqlmodel import select, Session
 
 class MatchmakingService:
     def __init__(self):
-        self.requests: dict[int, MatchmakingRequest] = {}
+        self.requests: dict[str, MatchmakingRequest] = {}
 
 
-    def createRequest(self, requestOwnerId: int, requestedGameSessionInfo: GameSessionInfoCreate) -> MatchmakingRequest:
+    def createRequest(self, requestOwnerId: str, requestedGameSessionInfo: GameSessionInfoCreate) -> MatchmakingRequest:
         # Create and store MatchmakingRequest
         request = MatchmakingRequest(
                 requestOwnerId = requestOwnerId,
@@ -50,7 +50,7 @@ class MatchmakingService:
 
 
 
-    def findRequestByOwner(self, requestOwnerId: int) -> MatchmakingRequest | None:
+    def findRequestByOwner(self, requestOwnerId: str) -> MatchmakingRequest | None:
         # Find and return stored MatchmakingRequest by requestOwnerId
         if requestOwnerId in self.requests:
             return self.requests[requestOwnerId]
@@ -170,11 +170,11 @@ class MatchmakingService:
                 matchmakingRequest.fulfilled and
                 matchmakingRequest.createdGameSessionInfo and (
                     (
-                        matchmakingRequest.createdGameSessionInfo.status == GameSessionStatus.WAITING_FOR_PLAYERS and
+                        matchmakingRequest.createdGameSessionInfo.state == GameSessionState.WAITING_FOR_PLAYERS and
                         matchmakingRequest.createdGameSessionInfo.created_at and
                         datetime.utcnow() - matchmakingRequest.createdGameSessionInfo.created_at > timeLimit
                     ) or (
-                        matchmakingRequest.createdGameSessionInfo.status == GameSessionStatus.FINISHED
+                        matchmakingRequest.createdGameSessionInfo.state == GameSessionState.FINISHED
                     )
                 )
         ):

@@ -1,8 +1,13 @@
+from app.models.player import Player
+from app.models.round import Round
+from app.models.track import TrackPublic
+from asyncio import Task
 from datetime import datetime
 from enum import StrEnum
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import DateTime, func
 from sqlmodel import JSON, Column, Field, SQLModel
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 
 class GameSessionVariant(StrEnum):
@@ -10,23 +15,23 @@ class GameSessionVariant(StrEnum):
     DUEL = "DUEL"
 
 
-class GameSessionStatus(StrEnum):
+class GameSessionState(StrEnum):
     WAITING_FOR_PLAYERS = "WAITING"
     IN_PROGRESS = "PLAYING"
     FINISHED = "FINISHED"
 
 
 class BaseGameSessionInfo(SQLModel):
-    players_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
+    players_ids: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     registered: bool = Field(default=False)
     rounds: int = Field(ge=3, default=7)
-    status: GameSessionStatus = Field(default=GameSessionStatus.WAITING_FOR_PLAYERS)
-    seconds_per_round: int = Field(ge=10, default=35)
+    state: GameSessionState = Field(default=GameSessionState.WAITING_FOR_PLAYERS)
+    seconds_per_round: int = Field(ge=5, default=35)
     variant: GameSessionVariant = Field(default=GameSessionVariant.SINGLE)
 
 
 class GameSessionInfo(BaseGameSessionInfo, table=True):
-    session_id: UUID = Field(primary_key=True, default_factory=uuid4)
+    session_id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
 
     created_at: datetime | None = Field(
         default=None,
@@ -39,4 +44,17 @@ class GameSessionInfoCreate(BaseGameSessionInfo):
 
 
 class GameSessionInfoPublic(BaseGameSessionInfo):
-    session_id: UUID
+    session_id: str
+
+class InitializedGameSession(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    game_session_info: GameSessionInfo
+    round_timer: Task | None = None
+    connected_players: dict[str, Player] = {}
+    disconnected_players: dict[str, Player] = {}
+    all_players_answered: bool = False
+    current_round: Round = Round()
+    previous_tracks: list[TrackPublic] = []
+    game_loop_running: bool = False
+

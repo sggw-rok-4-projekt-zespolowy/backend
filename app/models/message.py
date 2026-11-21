@@ -1,6 +1,7 @@
 from app.models.game_session import GameSessionInfoPublic
 from app.models.track import TrackPublic
 from pydantic import BaseModel
+from typing import Literal
 from uuid import UUID
 
 
@@ -9,8 +10,8 @@ class PlayerMessage(BaseModel):
 
 
 class ServerMessage(BaseModel):
-    player_id: int
-    matched_tracks: dict[int, list[dict[str, UUID]]]
+    player_id: str
+    matched_tracks: dict[str, list[TrackPublic]]
     current_song_audio_url: str
     started: bool
     finished: bool
@@ -20,5 +21,5 @@ class ServerMessage(BaseModel):
 
 
 class ServerMetaMessage(BaseModel):
-    msg_type: str = "error"
+    msg_type: Literal["error", "info"] = "error"
     detail: str

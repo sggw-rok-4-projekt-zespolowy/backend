@@ -1,8 +1,8 @@
 """empty message
 
-Revision ID: 4f7ff38c7aaa
+Revision ID: 9c51f0311b9d
 Revises: 
-Create Date: 2026-10-21 18:50:29.961596
+Create Date: 2026-11-17 19:24:02.343077
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 
 
 # revision identifiers, used by Alembic.
-revision: str = '4f7ff38c7aaa'
+revision: str = '9c51f0311b9d'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -25,10 +25,10 @@ def upgrade() -> None:
     sa.Column('players_ids', sa.JSON(), nullable=True),
     sa.Column('registered', sa.Boolean(), nullable=False),
     sa.Column('rounds', sa.Integer(), nullable=False),
-    sa.Column('status', sa.Enum('WAITING_FOR_PLAYERS', 'IN_PROGRESS', 'FINISHED', name='gamesessionstatus'), nullable=False),
+    sa.Column('state', sa.Enum('WAITING_FOR_PLAYERS', 'IN_PROGRESS', 'FINISHED', name='gamesessionstate'), nullable=False),
     sa.Column('seconds_per_round', sa.Integer(), nullable=False),
     sa.Column('variant', sa.Enum('SINGLE', 'DUEL', name='gamesessionvariant'), nullable=False),
-    sa.Column('session_id', sa.Uuid(), nullable=False),
+    sa.Column('session_id', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
     sa.PrimaryKeyConstraint('session_id')
     )
@@ -42,7 +42,7 @@ def upgrade() -> None:
     sa.Column('preview_url', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('title', sqlmodel.sql.sqltypes.AutoString(length=256), nullable=False),
     sa.Column('year', sa.Integer(), nullable=False),
-    sa.Column('track_id', sa.Uuid(), nullable=False),
+    sa.Column('track_id', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.PrimaryKeyConstraint('track_id'),
     sa.UniqueConstraint('deezer_track_id')
     )
@@ -52,7 +52,7 @@ def upgrade() -> None:
     sa.Column('role', sa.Enum('ADMIN', 'REGULAR_USER', name='user_role'), nullable=False),
     sa.Column('username', sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
     sa.Column('score', sa.Integer(), nullable=False),
-    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('id', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('password', sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('email'),
