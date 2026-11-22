@@ -14,6 +14,7 @@ from app.utils.crud import (
     read_user_by_id,
     read_game_session_info_by_game_session_id,
     update_game_session_info,
+    update_user
 )
 from app.utils.dependencies import get_current_user
 from app.utils.logger import logger
@@ -58,13 +59,14 @@ class GameConnectionManager:
     async def broadcastGameDetails(self, game_session_id: str):
         game = self.games[game_session_id]
         for player_id, player in game.connected_players.items():
-            self.logInfoMessage(game_session_id, f"Sending game details for next round to the player", player_id)
             await self.sendGameDetails(player.websocket, game_session_id, player_id)
 
     async def broadcastInfoMessage(self, game_session_id: str, msg: str):
         game = self.games[game_session_id]
         for player_id, player in game.connected_players.items():
-            await self.sendInfoMessage(player.websocket, game_session_id, msg, player_id)
+            await self.sendInfoMessage(
+                player.websocket, game_session_id, msg, player_id
+            )
 
     async def checkAnswers(self, game_session_id: str):
         game = self.games[game_session_id]
@@ -124,14 +126,34 @@ class GameConnectionManager:
             game.game_session_info.state != GameSessionState.FINISHED
             and len(game.disconnected_players) > 0
         ):
-            game.game_session_info.state = GameSessionState.WAITING_FOR_PLAYERS
+            game.game_session_info.state = GameSessionState.PLAYER_DISCONNECTION
+
+        if (
+            game.game_session_info.state == GameSessionState.PLAYER_DISCONNECTION
+            and len(game.disconnected_players) == 0
+        ):
+            game.game_session_info.state = GameSessionState.IN_PROGRESS
+
+        if (
+            game.game_session_info.state == GameSessionState.PLAYER_DISCONNECTION
+            and game.disconnect_timeout_end_time
+            and game.disconnect_timeout_end_time < datetime.now(timezone.utc)
+        ):
+            game.game_session_info.state = GameSessionState.TIMED_OUT
 
         # Broadcast message about game session state if it changed
         if game.game_session_info.state != prev_game_state:
             await self.broadcastInfoMessage(
                 game_session_id,
-                f"Game session state is: {game.game_session_info.state}"
+                f"Game session state is: {game.game_session_info.state}",
             )
+
+    def disconnectionCountStarted(self, game_session_id):
+        game = self.games[game_session_id]
+        if game.disconnect_timeout_end_time != None:
+            return True
+        else:
+            return False
 
     async def setPlayersState(self, game_session_id, state: PlayerState):
         game = self.games[game_session_id]
@@ -145,15 +167,35 @@ class GameConnectionManager:
     ):
         game = self.games[game_session_id]
 
-        if game.game_session_info.state == GameSessionState.FINISHED:
-            game_session_info = read_game_session_info_by_game_session_id(
-                db_session, game_session_id
-            )
-            assert game_session_info != None
-            update_game_session_info(db_session, game_session_info)
-            await self.broadcastInfoMessage(
-                game_session_id,
-                f"Game session state saved to database"
+        game_session_info_from_db = read_game_session_info_by_game_session_id(
+            db_session, game_session_id
+        )
+        assert game_session_info_from_db != None
+
+        # Updates
+        game_session_info_from_db.state = game.game_session_info.state
+
+        update_game_session_info(db_session, game_session_info_from_db)
+        await self.broadcastInfoMessage(
+            game_session_id, f"Game session state saved to database"
+        )
+
+    async def updatePlayersInDatabase(
+        self, db_session: Session, game_session_id: str
+    ):
+        game = self.games[game_session_id]
+
+        for player_id, player in game.connected_players.items():
+            user = read_user_by_id(db_session, player_id)
+
+            assert user != None
+
+            user.score += player.correct_answers
+
+            update_user(db_session, user)
+
+            await self.sendInfoMessage(
+                player.websocket, game_session_id, f"Player score saved to database", player_id
             )
 
     async def finishRound(self, db_session: Session, game_session_id: str):
@@ -162,8 +204,7 @@ class GameConnectionManager:
         # Change state and inform about finishing the round
         game.current_round.state = RoundState.FINISHED
         await self.broadcastInfoMessage(
-            game_session_id,
-            f"Round number {game.current_round.number} finished"
+            game_session_id, f"Round number {game.current_round.number} finished"
         )
 
     async def shouldContinueGameLoop(self, game_session_id):
@@ -173,12 +214,17 @@ class GameConnectionManager:
             != GameSessionState.FINISHED
         )
 
-    async def shouldGameFinish(self, game_session_id):
-        if (
-            self.games[game_session_id].game_session_info.state
-            == GameSessionState.FINISHED
-        ):
-            return True
+    async def shouldGameEnd(self, game_session_id):
+        should_game_end = False
+        game = self.games[game_session_id]
+
+        if self.getGameState(game_session_id) == GameSessionState.FINISHED:
+            should_game_end = True
+
+        if self.getGameState(game_session_id) == GameSessionState.TIMED_OUT:
+            should_game_end = True
+
+        return should_game_end
 
     async def shouldRoundFinish(self, game_session_id):
         should_round_finish = True
@@ -211,9 +257,27 @@ class GameConnectionManager:
         else:
             return False
 
+    async def startDisconnectionCount(self, game_session_id):
+        game = self.games[game_session_id]
+        game.disconnect_timeout_end_time = datetime.now(timezone.utc) + timedelta(
+            seconds=settings.SESSION_DISCONNECT_TERMINATION_TIME
+        )
+        await self.broadcastInfoMessage(
+            game_session_id,
+            f"Player disconnection. Game will end at {game.disconnect_timeout_end_time} (UTC) if the player doesn't reconnect",
+        )
+
+    async def stopDisconnectionCount(self, game_session_id):
+        game = self.games[game_session_id]
+        game.disconnect_timeout_end_time = None
+        await self.broadcastInfoMessage(
+            game_session_id, f"All players reconnected. Game will continue"
+        )
+
     async def runGameLoop(self, game_session_id: str):
         game = self.games[game_session_id]
         current_round = game.current_round
+
         game.game_loop_running = True
         self.logInfoMessage(game_session_id, "Game loop is starting")
 
@@ -230,11 +294,28 @@ class GameConnectionManager:
                         await self.finishRound(db_session, game_session_id)
                         await self.addTrackToTracksHistory(game_session_id)
                         await self.checkAnswers(game_session_id)
-                        await self.setPlayersState(game_session_id, PlayerState.ANSWERING)
+                        await self.setPlayersState(
+                            game_session_id, PlayerState.ANSWERING
+                        )
 
-                if await self.shouldGameFinish(game_session_id):
+                if (
+                    self.getGameState(game_session_id)
+                    == GameSessionState.PLAYER_DISCONNECTION
+                ):
+                    if not self.disconnectionCountStarted(game_session_id):
+                        await self.startDisconnectionCount(game_session_id)
+                else:
+                    if self.disconnectionCountStarted(game_session_id):
+                        await self.stopDisconnectionCount(game_session_id)
+
+                if await self.shouldGameEnd(game_session_id):
                     game.game_loop_running = False
-                    await manager.updateGameSessionInDatabase(db_session, game_session_id)
+                    await self.updateGameSessionInDatabase(
+                        db_session, game_session_id
+                    )
+                    await self.updatePlayersInDatabase(
+                        db_session, game_session_id
+                    )
 
                     # TODO: Update players score in DB after the game
                     await self.broadcastGameDetails(game_session_id)
@@ -247,6 +328,12 @@ class GameConnectionManager:
         game = self.games[game_session_id]
         player = game.connected_players[player_id]
 
+        self.logInfoMessage(
+            game_session_id,
+            f"Sending game details to the player",
+            player_id,
+        )
+
         assert game.current_round.track != None
 
         # TODO: Sending old payload for compatibility. Not everthing might be needed.
@@ -255,7 +342,8 @@ class GameConnectionManager:
             matched_tracks={player_id: player.matched_tracks},
             current_song_audio_url=game.current_round.track.preview_url,
             started=game.game_session_info.state == GameSessionState.IN_PROGRESS,
-            finished=game.game_session_info.state == GameSessionState.FINISHED,
+            finished=game.game_session_info.state == GameSessionState.FINISHED
+            or game.game_session_info.state == GameSessionState.TIMED_OUT,
             tracks_data=game.previous_tracks,
             current_round_number=game.current_round.number,
             game_session_metadata=GameSessionInfoPublic.model_validate(
@@ -297,8 +385,7 @@ class GameConnectionManager:
         # Change state and inform about starting the round
         game.current_round.state = RoundState.IN_PROGRESS
         await self.broadcastInfoMessage(
-            game_session_id,
-            f"Round number {game.current_round.number} starting"
+            game_session_id, f"Round number {game.current_round.number} starting"
         )
 
     # END: Game loop methods --------------------------------------------------- #
@@ -372,6 +459,11 @@ class GameConnectionManager:
                 player_id
             ].websocket = websocket
             del self.games[game_session_id].disconnected_players[player_id]
+
+            # Resend game details if player disconnected, when the game already started
+            if self.getGameState(game_session_id) == GameSessionState.PLAYER_DISCONNECTION:
+                await self.sendGameDetails(websocket, game_session_id, player_id)
+
             msg = f"Reconnected player with id: {player_id}"
         else:
             # Handle first connection
@@ -443,9 +535,13 @@ class GameConnectionManager:
     def isPlayerReconnecting(self, game_session_id: str, player_id: str):
         return player_id in self.games[game_session_id].disconnected_players
 
-    def logInfoMessage(self, game_session_id: str, msg: str, player_id: str | None = None):
+    def logInfoMessage(
+        self, game_session_id: str, msg: str, player_id: str | None = None
+    ):
         if player_id:
-            logger.info(f"[WS] - GameSession id: {game_session_id} - Player id: {player_id} - {msg}")
+            logger.info(
+                f"[WS] - GameSession id: {game_session_id} - Player id: {player_id} - {msg}"
+            )
         else:
             logger.info(f"[WS] - GameSession id: {game_session_id} - {msg}")
 
@@ -466,7 +562,11 @@ class GameConnectionManager:
         logger.error(f"[WS] - {game_session_id} - {msg}")
 
     async def sendInfoMessage(
-        self, websocket: WebSocket, game_session_id: str, msg: str, player_id: str | None = None
+        self,
+        websocket: WebSocket,
+        game_session_id: str,
+        msg: str,
+        player_id: str | None = None,
     ):
         await websocket.send_text(msg)
         self.logInfoMessage(game_session_id, msg, player_id)
@@ -493,6 +593,9 @@ class GameConnectionManager:
 
             if game_session_info.state == GameSessionState.FINISHED:
                 raise ValueError("Cannot start game session which has state FINISHED")
+
+            if game_session_info.state == GameSessionState.TIMED_OUT:
+                raise ValueError("Cannot start game session which has state TIMED_OUT")
 
             if game_session_info.registered:
                 user = None

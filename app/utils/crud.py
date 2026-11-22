@@ -30,8 +30,14 @@ def read_user_by_email(session: Session, email: str) -> User | None:
     return session.exec(select(User).where(User.email == email)).first()
 
 
-def read_user_by_id(session: Session, id: int) -> User | None:
+def read_user_by_id(session: Session, id: str) -> User | None:
     return session.exec(select(User).where(User.id == id)).first()
+
+def update_user(session: Session, user: User):
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
 
 # GameSessionInfo
 

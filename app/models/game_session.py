@@ -16,9 +16,11 @@ class GameSessionVariant(StrEnum):
 
 
 class GameSessionState(StrEnum):
-    WAITING_FOR_PLAYERS = "WAITING"
-    IN_PROGRESS = "PLAYING"
     FINISHED = "FINISHED"
+    IN_PROGRESS = "PLAYING"
+    PLAYER_DISCONNECTION = "PLAYER_DISCONNECTION"
+    TIMED_OUT = "TIMED_OUT"
+    WAITING_FOR_PLAYERS = "WAITING"
 
 
 class BaseGameSessionInfo(SQLModel):
@@ -35,7 +37,7 @@ class GameSessionInfo(BaseGameSessionInfo, table=True):
 
     created_at: datetime | None = Field(
         default=None,
-        sa_column=Column(DateTime(timezone=False), server_default=func.now()),
+        sa_column=Column(DateTime(timezone=True), server_default=func.now()),
     )
 
 
@@ -45,6 +47,7 @@ class GameSessionInfoCreate(BaseGameSessionInfo):
 
 class GameSessionInfoPublic(BaseGameSessionInfo):
     session_id: str
+
 
 class InitializedGameSession(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -57,4 +60,4 @@ class InitializedGameSession(BaseModel):
     current_round: Round = Round()
     previous_tracks: list[TrackPublic] = []
     game_loop_running: bool = False
-
+    disconnect_timeout_end_time: datetime | None = None
