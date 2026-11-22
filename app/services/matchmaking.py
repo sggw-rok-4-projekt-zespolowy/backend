@@ -3,6 +3,7 @@ from app.database import engine
 from app.models.game_session import GameSessionInfo, GameSessionInfoCreate, GameSessionState, GameSessionVariant
 from app.models.matchmaking_request import MatchmakingRequest
 from app.models.user import User
+from app.services.game import manager as gameManager
 from app.utils.logger import logger
 from datetime import datetime, timedelta, timezone
 from sqlmodel import select, Session
@@ -31,12 +32,37 @@ class MatchmakingService:
         return request
 
 
+    def isGameSessionInfoDeletable(self, gameSessionInfo: GameSessionInfo) -> bool:
+        # A GameSessionInfo can only be removed while the match never really started.
+        # Finished sessions are the match history and must be kept.
+        if gameSessionInfo.state == GameSessionState.FINISHED:
+            return False
+
+        # A game that is still being played must not be removed, even if the
+        # session went back to WAITING_FOR_PLAYERS after one player disconnected.
+        if gameSessionInfo.state == GameSessionState.IN_PROGRESS:
+            return False
+
+        loadedGame = gameManager.games.get(gameSessionInfo.session_id)
+        if loadedGame != None:
+            # The session is still loaded in memory: a player is connected, or
+            # the disconnect timer (game loop) hasn't run out yet.
+            if loadedGame.game_loop_running or loadedGame.connected_players:
+                return False
+
+        return True
+
+
     def deleteRequest(self, matchmakingRequest: MatchmakingRequest):
-        # Removes a paired GameSessionInfo if it was created
-        if matchmakingRequest.fulfilled:
+        # Removes a paired GameSessionInfo if it was created and may be removed
+        if matchmakingRequest.fulfilled and matchmakingRequest.createdGameSessionInfo:
             with Session(engine) as session:
-                session.delete(matchmakingRequest.createdGameSessionInfo)
-                session.commit()
+                gameSessionInfo = session.get(
+                        GameSessionInfo, matchmakingRequest.createdGameSessionInfo.session_id
+                    )
+                if gameSessionInfo != None and self.isGameSessionInfoDeletable(gameSessionInfo):
+                    session.delete(gameSessionInfo)
+                    session.commit()
 
         # Removes the MatchmakingRequest
         del self.requests[ matchmakingRequest.requestOwnerId ]
