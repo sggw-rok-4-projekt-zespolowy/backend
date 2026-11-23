@@ -21,7 +21,7 @@ from app.utils.logger import logger
 from datetime import datetime, timedelta, timezone
 from json import JSONDecodeError, loads
 from random import choice
-from sqlmodel import col
+from sqlmodel import and_, col, or_
 from threading import Timer
 from uuid import UUID
 
@@ -35,7 +35,6 @@ from typing import Any
 
 from app.database import engine, get_session
 from app.config import settings
-
 
 class GameConnectionManager:
     def __init__(self) -> None:
@@ -94,15 +93,20 @@ class GameConnectionManager:
                 player.correct_answers += 1
 
     async def chooseNextTrack(self, db_session: Session, game_session_id: str):
+        game = self.games[game_session_id]
         previous_tracks = self.games[game_session_id].previous_tracks
+        all_players = {**game.connected_players, **game.disconnected_players}
+        players_ids = all_players.keys()
 
         tracks = db_session.exec(
             select(Track).where(
-                col(Track.track_id).notin_(
+                and_(
+                    col(Track.track_id).notin_(
                     [track.track_id for track in previous_tracks]
-                )
+                ),
+                or_( Track.owner_id == None, col(Track.owner_id).in_(players_ids))
             )
-        ).all()
+        )).all()
 
         return TrackPublic.model_validate(choice(tracks))
 

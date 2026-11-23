@@ -172,9 +172,7 @@ class MatchmakingService:
             and matchmakingRequest.createdGameSessionInfo
             and (
                 (
-                    matchmakingRequest.createdGameSessionInfo.state
-                    == GameSessionState.WAITING_FOR_PLAYERS
-                    and matchmakingRequest.createdGameSessionInfo.created_at
+                    matchmakingRequest.createdGameSessionInfo.created_at
                     and datetime.now(timezone.utc)
                     - datetime.replace(matchmakingRequest.createdGameSessionInfo.created_at, tzinfo=timezone.utc)
                     > timeLimit
