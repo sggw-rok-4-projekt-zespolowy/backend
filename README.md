@@ -18,7 +18,8 @@ Za pierwszym razem:
 7. `fastapi dev`
 8. `python seed_tracks.py` (w drugim terminalu, gdy backend uruchomiony, w katalogu backend)
 
-Kolejnym razem (w katalogu backend):
+Kolejnym razem (w katalogu backend):  
+
 0. `source venv/bin/activate`
 1. `fastapi dev`
 
@@ -51,3 +52,13 @@ Możliwe problemy:
 - **Krok 5: "alembic is not recognized"**: krok 4 się nie powiódł albo venv nie jest aktywny (brak `(venv)` na początku linii). Aktywuj venv i powtórz krok 4.
 
 Potem można ściągnąć repo frontendu i uruchomić je przez `npm install` a potem `npm run dev` i powinno jakoś działać.
+
+Najnowsza wersja backendu dostępna pod:  
+https://gra-muzyczna-backend.mysliwczykrafal.pl
+
+Do podłączenia frontendu do powyższego, należy dodać plik `.env` do głównego katalogu z kodem frontendu, a w nim:
+
+```
+VITE_API_URL=https://gra-muzyczna-backend.mysliwczykrafal.pl
+VITE_WS_URL=https://gra-muzyczna-backend.mysliwczykrafal.pl
+```

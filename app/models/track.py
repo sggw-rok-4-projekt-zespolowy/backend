@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 
 class BaseTrack(SQLModel):
@@ -15,13 +15,20 @@ class BaseTrack(SQLModel):
     title: str = Field(max_length=256)
     year: int = Field(gt=1800, lt=2100)
     # None = shared track used in games; otherwise visible only on the owner's profile
-    owner_id: int | None = Field(default=None, foreign_key="user.id", index=True)
+    owner_id: str | None = Field(default=None, foreign_key="user.id", index=True)
 
+# Alembic migration fix
+BaseTrack.metadata.naming_convention = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
 
 class Track(BaseTrack, table=True):
-    __table_args__ = (UniqueConstraint("deezer_track_id", "owner_id"),)
-
-    track_id: UUID = Field(primary_key=True, default_factory=uuid4)
+    __table_args__ = (UniqueConstraint("deezer_track_id", "owner_id", name="owner_id_constraint"),)
+    track_id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
 
 
 class TrackCreate(BaseTrack):
@@ -33,4 +40,4 @@ class TrackCreateFromDeezer(BaseModel):
 
 
 class TrackPublic(BaseTrack):
-    track_id: UUID
+    track_id: str

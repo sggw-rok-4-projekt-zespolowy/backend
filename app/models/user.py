@@ -1,5 +1,6 @@
 from enum import Enum
 from sqlmodel import Field, SQLModel
+from uuid import uuid4
 
 
 class USER_ROLE(Enum):
@@ -19,7 +20,7 @@ class BaseUser(SQLModel):
 
 
 class User(BaseUser, table=True):
-    id: int | None = Field(default=None, primary_key=True)
+    id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
     password: str = Field(max_length=255)
 
 
@@ -28,4 +29,4 @@ class UserCreate(BaseUser):
 
 
 class UserPublic(BaseUser):
-    id: int
+    id: str

@@ -1,6 +1,6 @@
 from app.config import settings
 from app.database import SessionDep
-from app.models.game_session import GameSessionInfo, GameSessionInfoPublic, GameSessionStatus
+from app.models.game_session import GameSessionInfo, GameSessionInfoPublic, GameSessionState
 from app.utils.logger import logger
 from datetime import datetime, timezone
 from sqlmodel import select
@@ -35,7 +35,7 @@ class GameSessionsLoader:
 
             v = v_from_db
 
-            if v.status == GameSessionStatus.FINISHED:
+            if v.state == GameSessionState.FINISHED:
                 logger.info(
                     f"[GameSessionsLoader] Unloading game session {v.session_id} for player with id {k}"
                 )
@@ -46,7 +46,7 @@ class GameSessionsLoader:
         loaded_waiting_game_sessions = {
             player_id: game_session
             for player_id, game_session in self.player_to_loaded_game_session_map.items()
-            if game_session.status == GameSessionStatus.WAITING_FOR_PLAYERS
+            if game_session.state == GameSessionState.WAITING_FOR_PLAYERS
         }
 
         # Unloading
@@ -63,8 +63,8 @@ class GameSessionsLoader:
                 )
 
                 if (
-                    self.player_to_loaded_game_session_map[player_id].status
-                    == GameSessionStatus.WAITING_FOR_PLAYERS
+                    self.player_to_loaded_game_session_map[player_id].state
+                    == GameSessionState.WAITING_FOR_PLAYERS
                 ):  # Shouldn't happen. Sanity check
                     del self.player_to_loaded_game_session_map[player_id]
 
@@ -72,7 +72,7 @@ class GameSessionsLoader:
         db_waiting_game_sessions = (
             db_session.exec(
                 select(GameSessionInfo).where(
-                    GameSessionInfo.status == GameSessionStatus.WAITING_FOR_PLAYERS
+                    GameSessionInfo.state == GameSessionState.WAITING_FOR_PLAYERS
                 )
             )
         ).all()

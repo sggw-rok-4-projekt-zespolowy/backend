@@ -1,11 +1,11 @@
 from app.models.game_session import GameSessionInfo, GameSessionInfoCreate
 from datetime import datetime
 from pydantic import BaseModel, Field
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 
 class MatchmakingRequest(BaseModel):
-    requestOwnerId: int
+    requestOwnerId: str
     requestedGameSessionInfo: GameSessionInfoCreate
     createdGameSessionInfo: GameSessionInfo | None
     matchedRequest: "MatchmakingRequest | None"

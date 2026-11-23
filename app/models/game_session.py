@@ -1,9 +1,13 @@
+from app.models.player import Player
+from app.models.round import Round
+from app.models.track import TrackPublic
+from asyncio import Task
 from datetime import datetime
 from enum import StrEnum
-from pydantic import field_validator
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import DateTime, func
 from sqlmodel import JSON, Column, Field, SQLModel
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 
 class GameSessionVariant(StrEnum):
@@ -11,38 +15,29 @@ class GameSessionVariant(StrEnum):
     DUEL = "DUEL"
 
 
-class GameSessionStatus(StrEnum):
-    WAITING_FOR_PLAYERS = "WAITING"
-    IN_PROGRESS = "PLAYING"
+class GameSessionState(StrEnum):
     FINISHED = "FINISHED"
-
-
-# Special `rounds` value: play until every song in the playlist has been used
-ALL_ROUNDS = 0
+    IN_PROGRESS = "PLAYING"
+    PLAYER_DISCONNECTION = "PLAYER_DISCONNECTION"
+    TIMED_OUT = "TIMED_OUT"
+    WAITING_FOR_PLAYERS = "WAITING"
 
 
 class BaseGameSessionInfo(SQLModel):
-    players_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
+    players_ids: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     registered: bool = Field(default=False)
-    rounds: int = Field(ge=ALL_ROUNDS, default=7)
-    status: GameSessionStatus = Field(default=GameSessionStatus.WAITING_FOR_PLAYERS)
-    seconds_per_round: int = Field(ge=10, default=35)
+    rounds: int = Field(ge=3, default=7)
+    state: GameSessionState = Field(default=GameSessionState.WAITING_FOR_PLAYERS)
+    seconds_per_round: int = Field(ge=5, default=35)
     variant: GameSessionVariant = Field(default=GameSessionVariant.SINGLE)
-
-    @field_validator("rounds")
-    @classmethod
-    def rounds_all_or_at_least_three(cls, value: int) -> int:
-        if value != ALL_ROUNDS and value < 3:
-            raise ValueError(f"rounds must be {ALL_ROUNDS} (all songs) or at least 3")
-        return value
 
 
 class GameSessionInfo(BaseGameSessionInfo, table=True):
-    session_id: UUID = Field(primary_key=True, default_factory=uuid4)
+    session_id: str = Field(primary_key=True, default_factory=lambda: str(uuid4()))
 
     created_at: datetime | None = Field(
         default=None,
-        sa_column=Column(DateTime(timezone=False), server_default=func.now()),
+        sa_column=Column(DateTime(timezone=True), server_default=func.now()),
     )
 
 
@@ -51,4 +46,18 @@ class GameSessionInfoCreate(BaseGameSessionInfo):
 
 
 class GameSessionInfoPublic(BaseGameSessionInfo):
-    session_id: UUID
+    session_id: str
+
+
+class InitializedGameSession(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    game_session_info: GameSessionInfo
+    round_timer: Task | None = None
+    connected_players: dict[str, Player] = {}
+    disconnected_players: dict[str, Player] = {}
+    all_players_answered: bool = False
+    current_round: Round = Round()
+    previous_tracks: list[TrackPublic] = []
+    game_loop_running: bool = False
+    disconnect_timeout_end_time: datetime | None = None

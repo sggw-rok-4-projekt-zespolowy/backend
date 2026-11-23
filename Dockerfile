@@ -1,4 +1,4 @@
-FROM python:3.13-slim-trixie
+FROM python:3.14-slim-trixie
 
 WORKDIR /
 
@@ -7,5 +7,6 @@ COPY . /
 RUN pip install -r requirements.txt
 
 VOLUME /storage
+VOLUME /database
 
 ENTRYPOINT ["fastapi", "run", "--host", "0.0.0.0", "--port", "8000"]

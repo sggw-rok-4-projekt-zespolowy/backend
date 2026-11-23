@@ -54,3 +54,5 @@ htmlcov/
 
 # ruff
 .ruff_cache/
+
+TODO.md

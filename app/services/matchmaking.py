@@ -1,5 +1,11 @@
+from app.config import settings
 from app.database import engine
-from app.models.game_session import GameSessionInfo, GameSessionInfoCreate, GameSessionStatus, GameSessionVariant
+from app.models.game_session import (
+    GameSessionInfo,
+    GameSessionInfoCreate,
+    GameSessionState,
+    GameSessionVariant,
+)
 from app.models.matchmaking_request import MatchmakingRequest
 from app.models.user import User
 from app.utils.logger import logger
@@ -9,67 +15,59 @@ from sqlmodel import select, Session
 
 class MatchmakingService:
     def __init__(self):
-        self.requests: dict[int, MatchmakingRequest] = {}
+        self.requests: dict[str, MatchmakingRequest] = {}
 
-
-    def createRequest(self, requestOwnerId: int, requestedGameSessionInfo: GameSessionInfoCreate) -> MatchmakingRequest:
+    def createRequest(
+        self, requestOwnerId: str, requestedGameSessionInfo: GameSessionInfoCreate
+    ) -> MatchmakingRequest:
         # Create and store MatchmakingRequest
         request = MatchmakingRequest(
-                requestOwnerId = requestOwnerId,
-                requestedGameSessionInfo = requestedGameSessionInfo,
-                createdGameSessionInfo = None,
-                matchedRequest = None,
-                fulfilled = False
-            )
+            requestOwnerId=requestOwnerId,
+            requestedGameSessionInfo=requestedGameSessionInfo,
+            createdGameSessionInfo=None,
+            matchedRequest=None,
+            fulfilled=False,
+        )
 
         if requestOwnerId in self.requests:
-            raise ValueError('User already has an awaiting MatchmakingRequest')
+            raise ValueError("User already has an awaiting MatchmakingRequest")
 
         self.requests[requestOwnerId] = request
 
         return request
 
-
     def deleteRequest(self, matchmakingRequest: MatchmakingRequest):
-
-        # Removes a paired GameSessionInfo if it was created
-        if matchmakingRequest.fulfilled:
-            with Session(engine) as session:
-                session.delete(matchmakingRequest.createdGameSessionInfo)
-                session.commit()
-
         # Removes the MatchmakingRequest
-        del self.requests[ matchmakingRequest.requestOwnerId ]
+        del self.requests[matchmakingRequest.requestOwnerId]
 
         # Checks if there was a paired MatchmakingRequest and removes it, if not yet removed.
         if (
-                matchmakingRequest.matchedRequest != None and
-                matchmakingRequest.matchedRequest.requestOwnerId in self.requests
+            matchmakingRequest.matchedRequest != None
+            and matchmakingRequest.matchedRequest.requestOwnerId in self.requests
         ):
             self.deleteRequest(matchmakingRequest.matchedRequest)
 
-
-
-    def findRequestByOwner(self, requestOwnerId: int) -> MatchmakingRequest | None:
+    def findRequestByOwner(self, requestOwnerId: str) -> MatchmakingRequest | None:
         # Find and return stored MatchmakingRequest by requestOwnerId
         if requestOwnerId in self.requests:
             return self.requests[requestOwnerId]
         else:
             return None
 
-
-    def findRequestsByGameSessionInfo(self, requestedGameSessionInfo: GameSessionInfoCreate) -> list[MatchmakingRequest]:
+    def findRequestsByGameSessionInfo(
+        self, requestedGameSessionInfo: GameSessionInfoCreate
+    ) -> list[MatchmakingRequest]:
         # Find and return stored MatchmakingRequest by GameSessionInfo
         foundRequests = filter(
-                lambda x:
-                    x.requestedGameSessionInfo.rounds == requestedGameSessionInfo.rounds and
-                    x.requestedGameSessionInfo.seconds_per_round == requestedGameSessionInfo.seconds_per_round and
-                    x.requestedGameSessionInfo.variant == requestedGameSessionInfo.variant,
-                list(self.requests.values())
-            )
+            lambda x: x.requestedGameSessionInfo.rounds
+            == requestedGameSessionInfo.rounds
+            and x.requestedGameSessionInfo.seconds_per_round
+            == requestedGameSessionInfo.seconds_per_round
+            and x.requestedGameSessionInfo.variant == requestedGameSessionInfo.variant,
+            list(self.requests.values()),
+        )
 
         return list(foundRequests)
-
 
     def fulfillRequest(self, matchmakingRequest: MatchmakingRequest) -> bool:
         # Returns True if request was fulfilled, False otherwise.
@@ -83,13 +81,13 @@ class MatchmakingService:
             case GameSessionVariant.SINGLE:
                 requestedGameSessionInfo = matchmakingRequest.requestedGameSessionInfo
                 gameSessionInfo = GameSessionInfo.model_validate(
-                        {
-                            **requestedGameSessionInfo.model_dump(),
-                            "players_ids": [
-                                matchmakingRequest.requestOwnerId,
-                            ]
-                        }
-                    )
+                    {
+                        **requestedGameSessionInfo.model_dump(),
+                        "players_ids": [
+                            matchmakingRequest.requestOwnerId,
+                        ],
+                    }
+                )
 
                 with Session(engine) as session:
                     session.add(gameSessionInfo)
@@ -104,35 +102,39 @@ class MatchmakingService:
             case GameSessionVariant.DUEL:
                 # Match the given request with another of the same type, from another user.
                 requestsOfThisKind = self.findRequestsByGameSessionInfo(
-                        matchmakingRequest.requestedGameSessionInfo
-                    )
+                    matchmakingRequest.requestedGameSessionInfo
+                )
 
                 # Filter out own request, and fulfilled ones
-                otherRequestsOfThisKind = list(filter(
-                        lambda x: x.requestOwnerId != matchmakingRequest.requestOwnerId and x.fulfilled == False,
-                        requestsOfThisKind
-                    ))
+                otherRequestsOfThisKind = list(
+                    filter(
+                        lambda x: x.requestOwnerId != matchmakingRequest.requestOwnerId
+                        and x.fulfilled == False,
+                        requestsOfThisKind,
+                    )
+                )
 
                 if len(otherRequestsOfThisKind) > 0:
-                    otherRequestsOfThisKind.sort(key=lambda x: x.createdAt) # Sorting by creation time, to get the longest waiting request.
+                    otherRequestsOfThisKind.sort(
+                        key=lambda x: x.createdAt
+                    )  # Sorting by creation time, to get the longest waiting request.
                     matchedRequest = otherRequestsOfThisKind[0]
                     requestedGameSessionInfo = matchedRequest.requestedGameSessionInfo
 
                     gameSessionInfo = GameSessionInfo.model_validate(
-                            {
-                                **requestedGameSessionInfo.model_dump(),
-                                "players_ids": [
-                                    matchmakingRequest.requestOwnerId,
-                                    matchedRequest.requestOwnerId
-                                ]
-                            }
-                        )
+                        {
+                            **requestedGameSessionInfo.model_dump(),
+                            "players_ids": [
+                                matchmakingRequest.requestOwnerId,
+                                matchedRequest.requestOwnerId,
+                            ],
+                        }
+                    )
 
                     with Session(engine) as session:
                         session.add(gameSessionInfo)
                         session.commit()
                         session.refresh(gameSessionInfo)
-
 
                     matchmakingRequest.createdGameSessionInfo = gameSessionInfo
                     matchmakingRequest.matchedRequest = otherRequestsOfThisKind[0]
@@ -149,44 +151,51 @@ class MatchmakingService:
 
         return False
 
-
-    def isRequestStale(self, matchmakingRequest: MatchmakingRequest, timeLimit: timedelta) -> bool:
+    def isRequestStale(
+        self, matchmakingRequest: MatchmakingRequest, timeLimit: timedelta
+    ) -> bool:
 
         # Refreshing the paired GameSessionInfo, as it could've been finished in the meantime.
-        if (
-                matchmakingRequest.fulfilled and
-                matchmakingRequest.createdGameSessionInfo
-        ):
-            # TODO: Get the copy from DB then refresh it and pair with the request again
+        if matchmakingRequest.fulfilled and matchmakingRequest.createdGameSessionInfo:
             with Session(engine) as session:
                 gameSessionInfo = session.exec(
-                        select(GameSessionInfo).where(
-                            GameSessionInfo.session_id == matchmakingRequest.createdGameSessionInfo.session_id
-                        )
-                    ).first()
+                    select(GameSessionInfo).where(
+                        GameSessionInfo.session_id
+                        == matchmakingRequest.createdGameSessionInfo.session_id
+                    )
+                ).first()
                 session.refresh(gameSessionInfo)
                 matchmakingRequest.createdGameSessionInfo = gameSessionInfo
 
         if (
-                matchmakingRequest.fulfilled and
-                matchmakingRequest.createdGameSessionInfo and (
-                    (
-                        matchmakingRequest.createdGameSessionInfo.status == GameSessionStatus.WAITING_FOR_PLAYERS and
-                        matchmakingRequest.createdGameSessionInfo.created_at and
-                        datetime.utcnow() - matchmakingRequest.createdGameSessionInfo.created_at > timeLimit
-                    ) or (
-                        matchmakingRequest.createdGameSessionInfo.status == GameSessionStatus.FINISHED
-                    )
+            matchmakingRequest.fulfilled
+            and matchmakingRequest.createdGameSessionInfo
+            and (
+                (
+                    matchmakingRequest.createdGameSessionInfo.created_at
+                    and datetime.now(timezone.utc)
+                    - datetime.replace(matchmakingRequest.createdGameSessionInfo.created_at, tzinfo=timezone.utc)
+                    > timeLimit
                 )
+                or (
+                    matchmakingRequest.createdGameSessionInfo.state
+                    == GameSessionState.FINISHED
+                )
+            )
         ):
             return True
         else:
             return False
 
-
     def removeStaleRequests(self):
-        # Cleanup of old, not fulfilled requests
-        # TODO
-        pass
+        requestsCopy = self.requests.copy()
+        for playerId, request in requestsCopy.items():
+            # Skip already removed requests
+            if playerId in self.requests:
+                if self.isRequestStale(
+                    request, timedelta(seconds=settings.STALE_MATCHMAKING_REQUEST_TIME)
+                ):
+                    self.deleteRequest(request)
+
 
 matchmakingService = MatchmakingService()
