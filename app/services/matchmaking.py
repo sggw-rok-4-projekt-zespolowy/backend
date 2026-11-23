@@ -37,17 +37,6 @@ class MatchmakingService:
         return request
 
     def deleteRequest(self, matchmakingRequest: MatchmakingRequest):
-        # Removes a paired GameSessionInfo if it was created but only if it was never used in a game.
-        if (
-            matchmakingRequest.fulfilled
-            and matchmakingRequest.createdGameSessionInfo
-            and matchmakingRequest.createdGameSessionInfo.state
-            == GameSessionState.WAITING_FOR_PLAYERS
-        ):
-            with Session(engine) as session:
-                session.delete(matchmakingRequest.createdGameSessionInfo)
-                session.commit()
-
         # Removes the MatchmakingRequest
         del self.requests[matchmakingRequest.requestOwnerId]
 

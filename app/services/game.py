@@ -326,7 +326,7 @@ class GameConnectionManager:
         self, websocket: WebSocket, game_session_id: str, player_id: str
     ):
         game = self.games[game_session_id]
-        player = game.connected_players[player_id]
+        players = game.connected_players
 
         self.logInfoMessage(
             game_session_id,
@@ -337,9 +337,11 @@ class GameConnectionManager:
         assert game.current_round.track != None
 
         # TODO: Sending old payload for compatibility. Not everthing might be needed.
+        matched_tracks = {player_id: player.matched_tracks for player_id, player in players.items()}
+
         server_message = ServerMessage(
             player_id=player_id,
-            matched_tracks={player_id: player.matched_tracks},
+            matched_tracks=matched_tracks,
             current_song_audio_url=game.current_round.track.preview_url,
             started=game.game_session_info.state == GameSessionState.IN_PROGRESS,
             finished=game.game_session_info.state == GameSessionState.FINISHED

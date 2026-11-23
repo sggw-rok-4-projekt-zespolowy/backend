@@ -29,10 +29,8 @@ from fastapi import (
 )
 from random import randint
 from sqlmodel import select, func
-from threading import Timer
 from time import sleep
 from typing import Annotated
-from uuid import UUID, uuid4
 
 router = APIRouter(prefix="/game")
 
